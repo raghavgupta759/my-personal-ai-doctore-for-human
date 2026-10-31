@@ -4,13 +4,14 @@
 
 document.addEventListener("DOMContentLoaded", () => {
     
-    // Application State
+    // Application & Authentication State
+    let currentUser = null;
+    let authToken = localStorage.getItem("ai_doctor_auth_token") || null;
     let currentPage = "landing"; // 'landing', 'intake', 'results'
     let currentStep = 1;
-    let activeConversationId = localStorage.getItem("ai_doctor_cid") || null;
+    let activeConversationId = null;
     let activeDiagnosisData = null;
-    let intakeDraft = JSON.parse(localStorage.getItem("ai_doctor_intake_draft") || "{}");
-    
+
     let isSpeaking = false;
     let synth = window.speechSynthesis;
     let recognition = null;
@@ -18,6 +19,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let voiceMode = localStorage.getItem("ai_doctor_voice_mode") || "text-only"; // 'text-only' | 'text-voice'
     let currentLanguage = localStorage.getItem("ai_doctor_lang") || "english"; // 'english' | 'hindi' | 'hinglish'
+
+    function getUserKey(baseKey) {
+        return currentUser && currentUser.id ? `${baseKey}_${currentUser.id}` : baseKey;
+    }
+
+    async function apiFetch(url, options = {}) {
+        const headers = Object.assign({}, options.headers || {});
+        if (authToken) {
+            headers["Authorization"] = `Bearer ${authToken}`;
+        }
+        const response = await fetch(url, Object.assign({}, options, {
+            headers,
+            credentials: "same-origin"
+        }));
+        if (response.status === 401 && !url.startsWith("/api/auth/")) {
+            lockDashboardToLogin();
+        }
+        return response;
+    }
 
     function setLanguage(lang) {
         if (!["english", "hindi", "hinglish"].includes(lang)) lang = "english";
@@ -587,12 +607,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function saveIntakeDraft() {
+        if (!currentUser) return;
         const data = getFormIntakeData();
-        localStorage.setItem("ai_doctor_intake_draft", JSON.stringify(data));
+        localStorage.setItem(getUserKey("ai_doctor_intake_draft"), JSON.stringify(data));
     }
 
     function loadIntakeDraft() {
-        const draft = JSON.parse(localStorage.getItem("ai_doctor_intake_draft") || "{}");
+        if (!currentUser) return;
+        const draft = JSON.parse(localStorage.getItem(getUserKey("ai_doctor_intake_draft")) || "{}");
         if (draft.name && stepName) stepName.value = draft.name;
         if (draft.age && stepAge) stepAge.value = draft.age;
         if (draft.gender && stepGender) stepGender.value = draft.gender;
@@ -614,8 +636,6 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         }
     }
-
-    loadIntakeDraft();
 
     // Step 5 Review Summary Renderer
     function renderReviewSummary() {
@@ -699,7 +719,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (loadingOverlay) loadingOverlay.classList.remove("hidden");
 
         try {
-            const res = await fetch("/api/assess", {
+            const res = await apiFetch("/api/assess", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
@@ -710,7 +730,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (res.ok) {
                 const resultData = await res.json();
                 activeConversationId = resultData.conversation_id;
-                localStorage.setItem("ai_doctor_cid", activeConversationId);
+                localStorage.setItem(getUserKey("ai_doctor_cid"), activeConversationId);
 
                 if (resultData.is_emergency) {
                     renderEmergencyPage(resultData.emergency_message, data);
@@ -1135,7 +1155,7 @@ document.addEventListener("DOMContentLoaded", () => {
         };
 
         try {
-            const response = await fetch("/api/chat", {
+            const response = await apiFetch("/api/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
@@ -1163,7 +1183,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             const parsed = JSON.parse(line.slice(6));
                             if (parsed.conversation_id && !activeConversationId) {
                                 activeConversationId = parsed.conversation_id;
-                                localStorage.setItem("ai_doctor_cid", activeConversationId);
+                                localStorage.setItem(getUserKey("ai_doctor_cid"), activeConversationId);
                             }
                             if (parsed.text) {
                                 fullText += parsed.text;
@@ -1214,8 +1234,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function loadHistory() {
+        if (!currentUser) return;
         try {
-            const res = await fetch("/api/history");
+            const res = await apiFetch("/api/history");
             if (res.ok) {
                 const data = await res.json();
                 if (!data || data.length === 0) {
@@ -1250,7 +1271,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.openConsultationSummary = async function(cid) {
         try {
-            const res = await fetch(`/api/diagnosis/${cid}`);
+            const res = await apiFetch(`/api/diagnosis/${cid}`);
             if (res.ok) {
                 const diag = await res.json();
                 const dateStr = diag.created_at ? new Date(diag.created_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "Recent";
@@ -1320,9 +1341,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     window.loadConversation = async function(cid) {
         activeConversationId = cid;
-        localStorage.setItem("ai_doctor_cid", cid);
+        localStorage.setItem(getUserKey("ai_doctor_cid"), cid);
         try {
-            const res = await fetch(`/api/diagnosis/${cid}`);
+            const res = await apiFetch(`/api/diagnosis/${cid}`);
             if (res.ok) {
                 const diag = await res.json();
                 activeDiagnosisData = diag;
@@ -1340,14 +1361,27 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!cid) { alert("No active assessment to export PDF!"); return; }
         try {
             showNotification("Generating Signed PDF Report...");
-            const res = await fetch("/api/report/generate", {
+            const res = await apiFetch("/api/report/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ conversation_id: cid })
             });
             if (res.ok) {
                 const data = await res.json();
-                window.open(data.download_url, "_blank");
+                const pdfRes = await apiFetch(data.download_url);
+                if (pdfRes.ok) {
+                    const blob = await pdfRes.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = blobUrl;
+                    link.download = `consultation_report_${cid.slice(0, 8)}.pdf`;
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+                } else {
+                    showNotification("Access denied or report file unavailable.", "error");
+                }
             } else {
                 alert("Could not generate PDF report.");
             }
@@ -1427,22 +1461,27 @@ document.addEventListener("DOMContentLoaded", () => {
     const profileWeight = document.getElementById("profileWeight");
 
     async function loadProfileFromAPI() {
+        if (!currentUser) return;
         try {
-            const res = await fetch("/api/profile");
+            const res = await apiFetch("/api/profile");
             if (res.ok) {
                 const data = await res.json();
-                if (data.name && profileName) profileName.value = data.name;
-                if (data.age && profileAge) profileAge.value = data.age;
-                if (data.gender && profileGender) profileGender.value = data.gender;
-                if (data.allergies && profileAllergies) profileAllergies.value = data.allergies;
-                if (data.chronic_conditions && profileChronic) profileChronic.value = data.chronic_conditions;
-                if (data.height && profileHeight) profileHeight.value = data.height;
-                if (data.weight && profileWeight) profileWeight.value = data.weight;
+                if (profileName) profileName.value = data.name || currentUser.name || "";
+                if (profileAge) profileAge.value = data.age || 25;
+                if (profileGender) profileGender.value = data.gender || "Male";
+                if (profileLocation) profileLocation.value = (data.location && data.location !== "Not specified") ? data.location : "";
+                if (profileAllergies) profileAllergies.value = data.allergies || "None";
+                if (profileChronic) profileChronic.value = data.chronic_conditions || "None";
+                if (profileHeight) profileHeight.value = (data.height && data.height !== "Not specified") ? data.height : "";
+                if (profileWeight) profileWeight.value = (data.weight && data.weight !== "Not specified") ? data.weight : "";
                 
                 // Sync to Step 1 form if step 1 inputs exist
-                if (data.name && stepName && !stepName.value) stepName.value = data.name;
-                if (data.age && stepAge) stepAge.value = data.age;
-                if (data.gender && stepGender) stepGender.value = data.gender;
+                if (stepName) stepName.value = data.name || currentUser.name || "";
+                if (stepAge) stepAge.value = data.age || 25;
+                if (stepGender) stepGender.value = data.gender || "Male";
+                if (stepLocation && data.location && data.location !== "Not specified") {
+                    stepLocation.value = data.location;
+                }
             }
         } catch (e) {
             console.error("Load profile API error:", e);
@@ -1456,13 +1495,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 name: profileName.value.trim(),
                 age: parseInt(profileAge.value) || 25,
                 gender: profileGender.value,
+                location: profileLocation ? profileLocation.value.trim() || "Not specified" : "Not specified",
                 allergies: profileAllergies.value.trim() || "None",
                 chronic_conditions: profileChronic.value.trim() || "None",
                 height: profileHeight ? profileHeight.value.trim() || "Not specified" : "Not specified",
                 weight: profileWeight ? profileWeight.value.trim() || "Not specified" : "Not specified"
             };
             try {
-                const res = await fetch("/api/profile", {
+                const res = await apiFetch("/api/profile", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
@@ -1470,6 +1510,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (res.ok) {
                     showNotification("Patient profile updated successfully!");
                     if (stepName) stepName.value = payload.name;
+                    if (stepAge) stepAge.value = payload.age;
+                    if (stepGender) stepGender.value = payload.gender;
+                    if (stepLocation && payload.location !== "Not specified") stepLocation.value = payload.location;
                 } else {
                     showNotification("Failed to update profile", "error");
                 }
@@ -1520,7 +1563,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             try {
                 showNotification("Parsing & saving report data...");
-                const res = await fetch("/api/report/upload", {
+                const res = await apiFetch("/api/report/upload", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1534,7 +1577,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     const data = await res.json();
                     if (data.conversation_id && !activeConversationId) {
                         activeConversationId = data.conversation_id;
-                        localStorage.setItem("ai_doctor_cid", activeConversationId);
+                        localStorage.setItem(getUserKey("ai_doctor_cid"), activeConversationId);
                     }
 
                     if (uploadReportModal) uploadReportModal.classList.add("hidden");
@@ -1566,7 +1609,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (clearChatBtn) {
         clearChatBtn.addEventListener("click", () => {
             activeConversationId = null;
-            localStorage.removeItem("ai_doctor_cid");
+            localStorage.removeItem(getUserKey("ai_doctor_cid"));
             activeDiagnosisData = null;
             updateChatContextSubtext(null);
             drawerChatMessages.innerHTML = `
@@ -1644,10 +1687,270 @@ document.addEventListener("DOMContentLoaded", () => {
 
     initSpeechRecognition();
 
-    // Initial Setup
-    updateStepUI();
-    loadHistory();
-    loadProfileFromAPI();
+    // -------------------------------------------------------------
+    // 10. AUTHENTICATION & USER-WISE DATA ISOLATION CONTROLLER
+    // -------------------------------------------------------------
+    const authGateOverlay = document.getElementById("authGateOverlay");
+    const authTabLogin = document.getElementById("authTabLogin");
+    const authTabRegister = document.getElementById("authTabRegister");
+    const authFeedbackBox = document.getElementById("authFeedbackBox");
+    const loginForm = document.getElementById("loginForm");
+    const registerForm = document.getElementById("registerForm");
+    const switchToRegisterBtn = document.getElementById("switchToRegisterBtn");
+    const switchToLoginBtn = document.getElementById("switchToLoginBtn");
+    const currentUserBadge = document.getElementById("currentUserBadge");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const sidebarLogoutBtn = document.getElementById("sidebarLogoutBtn");
+
+    function showAuthFeedback(message, type = "error") {
+        if (!authFeedbackBox) return;
+        if (!message) {
+            authFeedbackBox.className = "auth-feedback hidden";
+            authFeedbackBox.textContent = "";
+            return;
+        }
+        authFeedbackBox.textContent = message;
+        authFeedbackBox.className = `auth-feedback ${type}`;
+    }
+
+    function switchAuthMode(mode) {
+        showAuthFeedback("");
+        if (mode === "register") {
+            if (authTabLogin) {
+                authTabLogin.classList.remove("active");
+                authTabLogin.setAttribute("aria-selected", "false");
+            }
+            if (authTabRegister) {
+                authTabRegister.classList.add("active");
+                authTabRegister.setAttribute("aria-selected", "true");
+            }
+            if (loginForm) loginForm.classList.add("hidden");
+            if (registerForm) registerForm.classList.remove("hidden");
+        } else {
+            if (authTabRegister) {
+                authTabRegister.classList.remove("active");
+                authTabRegister.setAttribute("aria-selected", "false");
+            }
+            if (authTabLogin) {
+                authTabLogin.classList.add("active");
+                authTabLogin.setAttribute("aria-selected", "true");
+            }
+            if (registerForm) registerForm.classList.add("hidden");
+            if (loginForm) loginForm.classList.remove("hidden");
+        }
+    }
+
+    if (authTabLogin) authTabLogin.addEventListener("click", () => switchAuthMode("login"));
+    if (authTabRegister) authTabRegister.addEventListener("click", () => switchAuthMode("register"));
+    if (switchToRegisterBtn) switchToRegisterBtn.addEventListener("click", () => switchAuthMode("register"));
+    if (switchToLoginBtn) switchToLoginBtn.addEventListener("click", () => switchAuthMode("login"));
+
+    function resetDashboardStateForNewUser() {
+        activeConversationId = null;
+        activeDiagnosisData = null;
+        currentStep = 1;
+
+        if (profileName) profileName.value = "";
+        if (profileAge) profileAge.value = 25;
+        if (profileGender) profileGender.value = "Male";
+        if (profileLocation) profileLocation.value = "";
+        if (profileHeight) profileHeight.value = "";
+        if (profileWeight) profileWeight.value = "";
+        if (profileAllergies) profileAllergies.value = "None";
+        if (profileChronic) profileChronic.value = "None";
+
+        if (stepName) stepName.value = "";
+        if (stepAge) stepAge.value = 25;
+        if (stepGender) stepGender.value = "Male";
+        if (stepLocation) stepLocation.value = "";
+        if (stepDuration) stepDuration.value = "1-2 days";
+        if (stepTrajectory) stepTrajectory.value = "Unchanged";
+        if (stepRecentFood) stepRecentFood.value = "";
+        if (stepCurrentMedications) stepCurrentMedications.value = "";
+        if (stepAllergies) stepAllergies.value = "";
+        if (stepNotes) stepNotes.value = "";
+        if (severitySlider) {
+            severitySlider.value = 5;
+            severitySlider.dispatchEvent(new Event("input"));
+        }
+        if (symptomChipsGrid) {
+            symptomChipsGrid.querySelectorAll(".symptom-chip.active").forEach(c => c.classList.remove("active"));
+        }
+        document.querySelectorAll("input[name='chronicCondition']:checked").forEach(cb => { cb.checked = false; });
+
+        if (historyList) {
+            historyList.innerHTML = `<div class="empty-state">No previous consultations.</div>`;
+        }
+        if (resultsContainer) {
+            resultsContainer.innerHTML = "";
+        }
+        updateChatContextSubtext(null);
+        if (drawerChatMessages) {
+            drawerChatMessages.innerHTML = `
+                <div class="message assistant-message">
+                    <div class="avatar"><i data-lucide="bot"></i></div>
+                    <div class="message-content">
+                        <div class="speaker-tag">AI Doctor</div>
+                        <p>Namaste! I am your <strong>Personal AI Doctor</strong>. How are you feeling today? Ask me any question or start a Health Check!</p>
+                    </div>
+                </div>
+            `;
+        }
+        closeChatDrawer();
+        if (sidebarDrawer) sidebarDrawer.classList.remove("open");
+        syncDrawerBackdrop();
+        showPage("landing");
+        updateStepUI();
+        if (typeof lucide !== "undefined") lucide.createIcons();
+    }
+
+    function unlockDashboardForUser(user, token) {
+        currentUser = user;
+        if (token) {
+            authToken = token;
+            localStorage.setItem("ai_doctor_auth_token", token);
+        }
+        resetDashboardStateForNewUser();
+
+        document.body.classList.remove("auth-locked");
+        if (authGateOverlay) authGateOverlay.classList.add("hidden");
+        if (currentUserBadge) {
+            currentUserBadge.textContent = `👤 ${user.name}`;
+            currentUserBadge.title = `${user.name} (${user.email})`;
+        }
+
+        activeConversationId = localStorage.getItem(getUserKey("ai_doctor_cid")) || null;
+        loadIntakeDraft();
+        loadProfileFromAPI();
+        loadHistory();
+    }
+
+    function lockDashboardToLogin() {
+        currentUser = null;
+        authToken = null;
+        localStorage.removeItem("ai_doctor_auth_token");
+        resetDashboardStateForNewUser();
+        document.body.classList.add("auth-locked");
+        if (authGateOverlay) authGateOverlay.classList.remove("hidden");
+        switchAuthMode("login");
+    }
+
+    if (loginForm) {
+        loginForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            showAuthFeedback("");
+            const emailInput = document.getElementById("loginEmail");
+            const passwordInput = document.getElementById("loginPassword");
+            const email = emailInput ? emailInput.value.trim() : "";
+            const password = passwordInput ? passwordInput.value : "";
+
+            if (!email || !password) {
+                showAuthFeedback("Please enter both your email/username and password.");
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showAuthFeedback(data.detail || "Invalid email or password.");
+                    return;
+                }
+                loginForm.reset();
+                unlockDashboardForUser(data.user, data.token);
+                showNotification(`Welcome back, ${data.user.name}!`);
+            } catch (err) {
+                console.error("Login error:", err);
+                showAuthFeedback("Unable to connect to authentication server.");
+            }
+        });
+    }
+
+    if (registerForm) {
+        registerForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            showAuthFeedback("");
+            const name = (document.getElementById("regName")?.value || "").trim();
+            const email = (document.getElementById("regEmail")?.value || "").trim();
+            const password = document.getElementById("regPassword")?.value || "";
+            const confirm_password = document.getElementById("regConfirmPassword")?.value || "";
+
+            if (!name || name.length < 2) {
+                showAuthFeedback("Please enter your full name (at least 2 characters).");
+                return;
+            }
+            if (!email || !email.includes("@")) {
+                showAuthFeedback("Please enter a valid email address.");
+                return;
+            }
+            if (password.length < 6) {
+                showAuthFeedback("Password must be at least 6 characters long.");
+                return;
+            }
+            if (password !== confirm_password) {
+                showAuthFeedback("Passwords do not match. Please re-enter carefully.");
+                return;
+            }
+
+            try {
+                const res = await fetch("/api/auth/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name, email, password, confirm_password })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showAuthFeedback(data.detail || "Registration failed. Please check your details.");
+                    return;
+                }
+                registerForm.reset();
+                unlockDashboardForUser(data.user, data.token);
+                showNotification(`Account created! Welcome, ${data.user.name}.`);
+            } catch (err) {
+                console.error("Registration error:", err);
+                showAuthFeedback("Unable to connect to authentication server.");
+            }
+        });
+    }
+
+    async function handleLogout() {
+        try {
+            await apiFetch("/api/auth/logout", { method: "POST" });
+        } catch (err) {
+            console.error("Logout error:", err);
+        }
+        lockDashboardToLogin();
+        showNotification("You have been logged out safely.");
+    }
+
+    if (logoutBtn) logoutBtn.addEventListener("click", handleLogout);
+    if (sidebarLogoutBtn) sidebarLogoutBtn.addEventListener("click", handleLogout);
+
+    async function initAuthSession() {
+        if (!authToken) {
+            lockDashboardToLogin();
+            return;
+        }
+        try {
+            const res = await apiFetch("/api/auth/me");
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.user) {
+                    unlockDashboardForUser(data.user, authToken);
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error("Session verification error:", e);
+        }
+        lockDashboardToLogin();
+    }
+
+    initAuthSession();
 
     // Helper functions
     function escapeHtml(text) {

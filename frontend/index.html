@@ -17,7 +17,7 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="css/styles.css">
 </head>
-<body class="light-theme">
+<body class="light-theme auth-locked">
     
     <!-- PREMIUM AI DOCTOR INTRODUCTION / WELCOME SCREEN -->
     <div id="appSplashScreen" class="splash-screen-overlay">
@@ -86,6 +86,91 @@
                 🔊 Tap to hear AI Doctor
             </button>
 
+        </div>
+    </div>
+
+    <!-- ========================================================== -->
+    <!-- SECURE PATIENT LOGIN & REGISTRATION GATE                   -->
+    <!-- ========================================================== -->
+    <div id="authGateOverlay" class="auth-gate-overlay">
+        <div class="auth-gate-container">
+            <div class="auth-card">
+                <div class="auth-brand-header">
+                    <div class="auth-brand-icon">
+                        <i data-lucide="heart-pulse"></i>
+                    </div>
+                    <h2>Personal AI Doctor</h2>
+                    <p>Private, encrypted personal health account &amp; medical records</p>
+                </div>
+
+                <!-- LOGIN / REGISTER TABS -->
+                <div class="auth-tabs" role="tablist">
+                    <button type="button" id="authTabLogin" class="auth-tab-btn active" role="tab" aria-selected="true">
+                        Sign In
+                    </button>
+                    <button type="button" id="authTabRegister" class="auth-tab-btn" role="tab" aria-selected="false">
+                        Register
+                    </button>
+                </div>
+
+                <!-- VALIDATION / ERROR FEEDBACK BANNER -->
+                <div id="authFeedbackBox" class="auth-feedback hidden" role="alert"></div>
+
+                <!-- LOGIN FORM -->
+                <form id="loginForm" class="auth-form" autocomplete="on">
+                    <div class="form-group">
+                        <label for="loginEmail">Email Address or Username</label>
+                        <input type="text" id="loginEmail" name="email" placeholder="e.g. raghav@example.com" required autocomplete="username">
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPassword">Password</label>
+                        <input type="password" id="loginPassword" name="password" placeholder="Enter your password" required autocomplete="current-password">
+                    </div>
+                    <button type="submit" id="loginSubmitBtn" class="btn btn-primary btn-md full-width shine-effect">
+                        <i data-lucide="log-in"></i>
+                        <span>Login to My Dashboard</span>
+                    </button>
+                    <div class="auth-switch-row">
+                        <span>New to Personal AI Doctor?</span>
+                        <button type="button" id="switchToRegisterBtn" class="auth-link-btn">Create a new account</button>
+                    </div>
+                </form>
+
+                <!-- REGISTER FORM -->
+                <form id="registerForm" class="auth-form hidden" autocomplete="on">
+                    <div class="form-group">
+                        <label for="regName">Full Name</label>
+                        <input type="text" id="regName" name="name" placeholder="e.g. Raghav Gupta" required autocomplete="name">
+                    </div>
+                    <div class="form-group">
+                        <label for="regEmail">Email Address</label>
+                        <input type="email" id="regEmail" name="email" placeholder="e.g. raghav@example.com" required autocomplete="email">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="regPassword">Password</label>
+                            <input type="password" id="regPassword" name="password" placeholder="Min. 6 characters" minlength="6" required autocomplete="new-password">
+                        </div>
+                        <div class="form-group">
+                            <label for="regConfirmPassword">Confirm Password</label>
+                            <input type="password" id="regConfirmPassword" name="confirm_password" placeholder="Re-enter password" minlength="6" required autocomplete="new-password">
+                        </div>
+                    </div>
+                    <button type="submit" id="registerSubmitBtn" class="btn btn-primary btn-md full-width shine-effect">
+                        <i data-lucide="user-plus"></i>
+                        <span>Register &amp; Open Dashboard</span>
+                    </button>
+                    <div class="auth-switch-row">
+                        <span>Already have an account?</span>
+                        <button type="button" id="switchToLoginBtn" class="auth-link-btn">Sign in here</button>
+                    </div>
+                </form>
+
+                <div class="auth-security-note">
+                    <i data-lucide="shield-check"></i>
+                    <span>100% Isolated Personal Medical Profile &amp; History</span>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -169,6 +254,9 @@
             </div>
 
             <div class="sidebar-footer">
+                <button type="button" id="sidebarLogoutBtn" class="btn btn-outline btn-sm full-width" style="margin-bottom: 10px;">
+                    <i data-lucide="log-out"></i> <span>Logout Account</span>
+                </button>
                 <div class="signature">Made by Raghav • Privacy-First</div>
             </div>
         </aside>
@@ -215,6 +303,15 @@
                     <button id="navHealthCheckBtn" class="btn btn-primary btn-sm shine-effect">
                         <i data-lucide="activity"></i> <span>Start Health Check</span>
                     </button>
+
+                    <!-- AUTHENTICATED USER BADGE & LOGOUT -->
+                    <div class="header-user-controls" id="headerUserControls">
+                        <span id="currentUserBadge" class="user-account-badge" title="Logged in Patient Account"></span>
+                        <button type="button" id="logoutBtn" class="icon-btn-text logout-btn" title="Logout">
+                            <i data-lucide="log-out"></i>
+                            <span class="btn-text-hide-mobile">Logout</span>
+                        </button>
+                    </div>
                 </div>
             </header>
 

@@ -79,7 +79,7 @@ class LLMService:
 
 
     def _build_context(self, history, profile, active_diagnosis, intake_data,
-                       language, report_data=None, conversation_id=None):
+                       language, report_data=None, conversation_id=None, user_id=None):
         """
         Build system instruction string and conversation history list.
 
@@ -167,8 +167,8 @@ class LLMService:
         from backend.db.database import get_latest_patient_report
 
         fetched_report = report_data or (
-            get_latest_patient_report(conversation_id) if conversation_id
-            else get_latest_patient_report()
+            get_latest_patient_report(conversation_id, user_id=user_id) if conversation_id
+            else get_latest_patient_report(user_id=user_id)
         )
         if fetched_report:
             if intent and intent.get("type") == "lab_test":
@@ -196,10 +196,10 @@ class LLMService:
 
     async def generate_response_stream(self, conversation_id=None, history=None, profile=None,
                                        active_diagnosis=None, intake_data=None,
-                                       language="english", report_data=None):
+                                       language="english", report_data=None, user_id=None):
         system_instruction, conversation = self._build_context(
             history, profile, active_diagnosis, intake_data, language,
-            report_data, conversation_id=conversation_id
+            report_data, conversation_id=conversation_id, user_id=user_id
         )
 
         if not self.gemini_key:

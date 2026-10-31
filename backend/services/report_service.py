@@ -16,10 +16,10 @@ from backend.db.database import get_connection, get_latest_diagnosis, get_conver
 REPORTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
-def generate_pdf_report(conversation_id: str) -> str:
-    profile = get_or_create_default_profile()
-    messages = get_conversation_messages(conversation_id)
-    diagnosis = get_latest_diagnosis(conversation_id)
+def generate_pdf_report(conversation_id: str, user_id: str = None) -> str:
+    profile = get_or_create_default_profile(user_id=user_id)
+    messages = get_conversation_messages(conversation_id, user_id=user_id)
+    diagnosis = get_latest_diagnosis(conversation_id, user_id=user_id)
     
     report_filename = f"consultation_report_{conversation_id[:8]}.pdf"
     file_path = os.path.join(REPORTS_DIR, report_filename)
@@ -195,7 +195,10 @@ def generate_pdf_report(conversation_id: str) -> str:
     conn = get_connection()
     cursor = conn.cursor()
     report_id = str(uuid.uuid4())
-    cursor.execute("INSERT INTO reports (id, conversation_id, file_path) VALUES (?, ?, ?)", (report_id, conversation_id, file_path))
+    cursor.execute(
+        "INSERT INTO reports (id, user_id, conversation_id, file_path) VALUES (?, ?, ?, ?)",
+        (report_id, user_id or "__legacy_local__", conversation_id, file_path),
+    )
     conn.commit()
     conn.close()
     

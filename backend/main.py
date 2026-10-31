@@ -11,7 +11,7 @@ workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if workspace_root not in sys.path:
     sys.path.insert(0, workspace_root)
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,12 @@ from pydantic import BaseModel
 from typing import Optional
 
 from backend.db.database import (
+    create_user,
+    authenticate_user,
+    create_session,
+    get_user_by_token,
+    delete_session,
+    verify_conversation_ownership,
     get_or_create_default_profile,
     update_profile,
     save_message,
@@ -28,7 +34,7 @@ from backend.db.database import (
     get_latest_diagnosis,
     save_patient_report,
     get_latest_patient_report,
-    get_connection
+    get_connection,
 )
 from backend.services.safety_guard import check_red_flags, check_red_flags_in_intake
 from backend.services.llm_service import llm_service
@@ -46,7 +52,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Models
+
+# ---------------------------------------------------------------------------
+# Request Models
+# ---------------------------------------------------------------------------
+class RegisterRequestModel(BaseModel):
+    name: str
+    email: str
+    password: str
+    confirm_password: str
+
+
+class LoginRequestModel(BaseModel):
+    email: str
+    password: str
+
+
 class ProfileUpdateModel(BaseModel):
     name: str
     age: int
@@ -56,6 +77,7 @@ class ProfileUpdateModel(BaseModel):
     location: Optional[str] = "Not specified"
     height: Optional[str] = "Not specified"
     weight: Optional[str] = "Not specified"
+
 
 class AssessmentRequestModel(BaseModel):
     name: Optional[str] = "Guest"
@@ -76,6 +98,7 @@ class AssessmentRequestModel(BaseModel):
     conversation_id: Optional[str] = None
     language: Optional[str] = "english"
 
+
 class ChatRequestModel(BaseModel):
     conversation_id: Optional[str] = None
     message: str
@@ -83,14 +106,41 @@ class ChatRequestModel(BaseModel):
     intake_data: Optional[dict] = None
     language: Optional[str] = "english"
 
+
 class ReportUploadModel(BaseModel):
     conversation_id: Optional[str] = None
     report_name: Optional[str] = "Medical Lab Report"
     report_text: str
 
+
 class ReportGenerateModel(BaseModel):
     conversation_id: str
 
+
+# ---------------------------------------------------------------------------
+# Authentication Dependency Helpers
+# ---------------------------------------------------------------------------
+def _extract_token(request: Request) -> Optional[str]:
+    auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    cookie_token = request.cookies.get("ai_doctor_session")
+    if cookie_token:
+        return cookie_token.strip()
+    return None
+
+
+def get_current_user(request: Request) -> dict:
+    token = _extract_token(request)
+    user = get_user_by_token(token) if token else None
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required. Please log in.")
+    return user
+
+
+# ---------------------------------------------------------------------------
+# Health & Authentication Endpoints
+# ---------------------------------------------------------------------------
 @app.get("/health")
 @app.get("/api/health")
 def health_check():
@@ -100,15 +150,90 @@ def health_check():
         "app": "Personal AI Doctor",
         "version": "3.0",
         "ml_classifier_loaded": ml_loaded,
-        "active_model": llm_service.model_name
+        "active_model": llm_service.model_name,
     }
 
+
+@app.post("/api/auth/register")
+def register_endpoint(data: RegisterRequestModel, response: Response):
+    name = (data.name or "").strip()
+    email = (data.email or "").strip().lower()
+    password = data.password or ""
+    confirm_password = data.confirm_password or ""
+
+    if not name or len(name) < 2:
+        raise HTTPException(status_code=400, detail="Please enter your full name (at least 2 characters).")
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long.")
+    if password != confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match.")
+
+    try:
+        user = create_user(name=name, email=email, password=password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    token = create_session(user["id"])
+    response.set_cookie(
+        key="ai_doctor_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=14 * 24 * 3600,
+        path="/",
+    )
+    return {"status": "success", "token": token, "user": user}
+
+
+@app.post("/api/auth/login")
+def login_endpoint(data: LoginRequestModel, response: Response):
+    email = (data.email or "").strip()
+    password = data.password or ""
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required.")
+
+    user = authenticate_user(email, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    token = create_session(user["id"])
+    response.set_cookie(
+        key="ai_doctor_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=14 * 24 * 3600,
+        path="/",
+    )
+    return {"status": "success", "token": token, "user": user}
+
+
+@app.post("/api/auth/logout")
+def logout_endpoint(request: Request, response: Response):
+    token = _extract_token(request)
+    if token:
+        delete_session(token)
+    response.delete_cookie(key="ai_doctor_session", path="/")
+    return {"status": "success", "message": "Logged out successfully."}
+
+
+@app.get("/api/auth/me")
+def me_endpoint(user: dict = Depends(get_current_user)):
+    return {"authenticated": True, "user": user}
+
+
+# ---------------------------------------------------------------------------
+# Protected User-Isolated Medical Endpoints
+# ---------------------------------------------------------------------------
 @app.get("/api/profile")
-def get_profile():
-    return get_or_create_default_profile()
+def get_profile(user: dict = Depends(get_current_user)):
+    return get_or_create_default_profile(user_id=user["id"])
+
 
 @app.post("/api/profile")
-def save_user_profile(data: ProfileUpdateModel):
+def save_user_profile(data: ProfileUpdateModel, user: dict = Depends(get_current_user)):
     return update_profile(
         name=data.name,
         age=data.age,
@@ -116,62 +241,90 @@ def save_user_profile(data: ProfileUpdateModel):
         allergies=data.allergies,
         chronic_conditions=data.chronic_conditions,
         height=data.height or "Not specified",
-        weight=data.weight or "Not specified"
+        weight=data.weight or "Not specified",
+        location=data.location or "Not specified",
+        user_id=user["id"],
     )
 
+
 @app.post("/api/report/upload")
-def upload_patient_report_endpoint(data: ReportUploadModel):
+def upload_patient_report_endpoint(data: ReportUploadModel, user: dict = Depends(get_current_user)):
     conversation_id = data.conversation_id or str(uuid.uuid4())
+    ownership = verify_conversation_ownership(conversation_id, user["id"])
+    if ownership == "forbidden":
+        raise HTTPException(status_code=403, detail="Unauthorized access to conversation.")
+
     parsed = parse_medical_report_text(data.report_text, data.report_name or "Medical Lab Report")
     report_id = save_patient_report(
         conversation_id=conversation_id,
         report_name=parsed["report_name"],
         report_date=parsed["date"],
         extracted_json=parsed,
-        raw_text=parsed["raw_text"]
+        raw_text=parsed["raw_text"],
+        user_id=user["id"],
     )
     return {
         "status": "success",
         "report_id": report_id,
         "conversation_id": conversation_id,
-        "parsed_summary": parsed
+        "parsed_summary": parsed,
     }
 
+
 @app.get("/api/history")
-def list_history():
-    return get_all_conversations()
+def list_history(user: dict = Depends(get_current_user)):
+    return get_all_conversations(user_id=user["id"])
+
 
 @app.get("/api/history/{conversation_id}")
-def get_history_detail(conversation_id: str):
-    return get_conversation_messages(conversation_id)
+def get_history_detail(conversation_id: str, user: dict = Depends(get_current_user)):
+    ownership = verify_conversation_ownership(conversation_id, user["id"])
+    if ownership == "forbidden":
+        raise HTTPException(status_code=403, detail="Access denied: You do not own this medical record.")
+    if ownership == "not_found":
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return get_conversation_messages(conversation_id, user_id=user["id"])
+
 
 @app.get("/api/diagnosis/{conversation_id}")
-def get_diagnosis_detail(conversation_id: str):
-    diagnosis = get_latest_diagnosis(conversation_id)
+def get_diagnosis_detail(conversation_id: str, user: dict = Depends(get_current_user)):
+    ownership = verify_conversation_ownership(conversation_id, user["id"])
+    if ownership == "forbidden":
+        raise HTTPException(status_code=403, detail="Access denied: You do not own this diagnosis record.")
+    diagnosis = get_latest_diagnosis(conversation_id, user_id=user["id"])
     if not diagnosis:
         raise HTTPException(status_code=404, detail="No diagnosis found for this conversation.")
     return diagnosis
 
+
 @app.post("/api/assess")
-def assess_symptoms_endpoint(data: AssessmentRequestModel):
+def assess_symptoms_endpoint(data: AssessmentRequestModel, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
     conversation_id = data.conversation_id or str(uuid.uuid4())
+    ownership = verify_conversation_ownership(conversation_id, user_id)
+    if ownership == "forbidden":
+        # Never overwrite or append to another user's conversation
+        conversation_id = str(uuid.uuid4())
+
     req_lang = (data.language or "english").lower().strip()
-    
-    # Save patient profile if provided
+
+    # Save patient profile strictly under authenticated user_id
     if data.name:
         update_profile(
             name=data.name,
             age=data.age or 25,
             gender=data.gender or "Male",
             allergies=data.allergies or "None",
-            chronic_conditions=data.chronic_conditions or "None"
+            chronic_conditions=data.chronic_conditions or "None",
+            location=data.location or "Not specified",
+            user_id=user_id,
         )
 
     # Check for Emergency Red Flags in intake
     safety_check = check_red_flags_in_intake(
         symptoms=data.symptoms,
         notes=data.notes or "",
-        severity_score=data.severity_score or 5
+        severity_score=data.severity_score or 5,
     )
 
     symptoms_text = ", ".join(data.symptoms)
@@ -182,13 +335,13 @@ def assess_symptoms_endpoint(data: AssessmentRequestModel):
         f"Allergies: {data.allergies}. Conditions: {data.chronic_conditions}. Pain Severity: {data.severity_score}/10 ({data.severity}). "
         f"Additional Notes: {data.notes}"
     )
-    
-    # Save structured initial query to DB
-    save_message(conversation_id, "user", combined_notes)
+
+    # Save structured initial query to DB scoped to user_id
+    save_message(conversation_id, "user", combined_notes, user_id=user_id)
 
     if safety_check["is_emergency"]:
         emergency_text = safety_check["emergency_message"]
-        save_message(conversation_id, "assistant", emergency_text)
+        save_message(conversation_id, "assistant", emergency_text, user_id=user_id)
         return {
             "status": "emergency",
             "is_emergency": True,
@@ -197,34 +350,37 @@ def assess_symptoms_endpoint(data: AssessmentRequestModel):
             "intake_summary": {
                 "name": data.name,
                 "symptoms": data.symptoms,
-                "severity_score": data.severity_score
-            }
+                "severity_score": data.severity_score,
+            },
         }
 
-    
     # Predict condition via ML & multi-field reasoning
-    history = get_conversation_messages(conversation_id)
+    history = get_conversation_messages(conversation_id, user_id=user_id)
     top3_preds, top_conf, detected = classifier_service.predict_top3(history)
-    
+
     primary_condition = top3_preds[0]["condition"] if top3_preds else "Viral Fever"
     from backend.services.rag_service import get_condition_knowledge, get_all_language_knowledge
+
     knowledge = get_condition_knowledge(primary_condition, language=req_lang)
     multilingual_knowledge = get_all_language_knowledge(primary_condition)
-    
-    # Synthesize step-by-step clinical reasoning based on ALL intake fields
+
     reasoning_steps = []
     reasoning_steps.append(f"• Analyzed reported symptoms ({symptoms_text}) spanning duration ({data.duration}).")
     if data.recent_food_activity and data.recent_food_activity.lower() != "none":
         reasoning_steps.append(f"• Evaluated environmental trigger: {data.recent_food_activity}.")
     if data.severity_score >= 7:
-        reasoning_steps.append(f"• Highlighted high discomfort rating ({data.severity_score}/10) requiring close monitoring.")
+        reasoning_steps.append(
+            f"• Highlighted high discomfort rating ({data.severity_score}/10) requiring close monitoring."
+        )
     if data.chronic_conditions and data.chronic_conditions.lower() != "none":
-        reasoning_steps.append(f"• Factored underlying medical profile ({data.chronic_conditions}) into OTC & recovery safety.")
-    
+        reasoning_steps.append(
+            f"• Factored underlying medical profile ({data.chronic_conditions}) into OTC & recovery safety."
+        )
+
     clinical_reasoning = "\n".join(reasoning_steps)
     cause_with_reasoning = f"{knowledge['cause']}\n\nClinical Assessment Reasoning:\n{clinical_reasoning}"
 
-    # Save diagnosis record
+    # Save diagnosis record scoped to user_id
     save_diagnosis(
         conversation_id=conversation_id,
         condition=primary_condition,
@@ -238,18 +394,19 @@ def assess_symptoms_endpoint(data: AssessmentRequestModel):
         rest_days=knowledge["rest_days"],
         red_flags=knowledge["red_flags"],
         ml_top3=top3_preds,
-        ml_confidence=top_conf
+        ml_confidence=top_conf,
+        user_id=user_id,
     )
-    
-    # Generate PDF Report
+
+    # Generate PDF Report scoped to user_id
     report_id = None
     download_url = None
     try:
-        report_id = generate_pdf_report(conversation_id)
+        report_id = generate_pdf_report(conversation_id, user_id=user_id)
         download_url = f"/api/report/download/{report_id}"
     except Exception as e:
         print(f"Warning: PDF report generation issue: {e}")
-        
+
     return {
         "status": "success",
         "conversation_id": conversation_id,
@@ -279,61 +436,64 @@ def assess_symptoms_endpoint(data: AssessmentRequestModel):
             "recent_food_activity": data.recent_food_activity,
             "allergies": data.allergies,
             "chronic_conditions": data.chronic_conditions,
-            "severity_score": data.severity_score
-        }
+            "severity_score": data.severity_score,
+        },
     }
 
+
 @app.post("/api/chat")
-async def chat_endpoint(data: ChatRequestModel):
+async def chat_endpoint(data: ChatRequestModel, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
     conversation_id = data.conversation_id or str(uuid.uuid4())
+    ownership = verify_conversation_ownership(conversation_id, user_id)
+    if ownership == "forbidden":
+        raise HTTPException(status_code=403, detail="Access denied: You do not own this conversation.")
+
     user_msg = data.message.strip()
     req_lang = (data.language or "english").lower().strip()
-    
+
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    # 1. Check Safety Guard for Emergency Red Flags
     safety_check = check_red_flags(user_msg)
-    
-    # Save user message to database
-    save_message(conversation_id, "user", user_msg)
+    save_message(conversation_id, "user", user_msg, user_id=user_id)
 
     if safety_check["is_emergency"]:
         emergency_text = safety_check["emergency_message"]
-        save_message(conversation_id, "assistant", emergency_text)
-        
+        save_message(conversation_id, "assistant", emergency_text, user_id=user_id)
+
         async def emergency_generator():
             yield f"data: {json_data(conversation_id, emergency_text, is_emergency=True)}\n\n"
+
         return StreamingResponse(emergency_generator(), media_type="text/event-stream")
 
-    # Fetch conversation history & profile
-    profile = get_or_create_default_profile()
-    history = get_conversation_messages(conversation_id)
+    profile = get_or_create_default_profile(user_id=user_id)
+    history = get_conversation_messages(conversation_id, user_id=user_id)
 
     async def stream_generator():
         collected_text = ""
-        # Send initial SSE chunk with conversation_id header info
         yield f"data: {json_data(conversation_id, '', is_start=True)}\n\n"
-        
+
         try:
             async for chunk in llm_service.generate_response_stream(
-                conversation_id=conversation_id, 
-                history=history, 
-                profile=profile, 
+                conversation_id=conversation_id,
+                history=history,
+                profile=profile,
                 active_diagnosis=data.active_diagnosis,
                 intake_data=data.intake_data,
-                language=req_lang
+                language=req_lang,
+                user_id=user_id,
             ):
                 collected_text += chunk
                 yield f"data: {json_data(conversation_id, chunk)}\n\n"
-                
-            # Save assistant message to DB once generation finishes
+
             if collected_text:
-                save_message(conversation_id, "assistant", collected_text)
-                
+                save_message(conversation_id, "assistant", collected_text, user_id=user_id)
+
             yield f"data: {json_data(conversation_id, '', is_end=True)}\n\n"
         except Exception as e:
             import traceback
+
             print(f"[Main API Chat Exception]: {e}")
             traceback.print_exc()
             err_msg = "⚠️ Service temporarily unavailable while generating AI response. Technical details logged."
@@ -341,41 +501,62 @@ async def chat_endpoint(data: ChatRequestModel):
 
     return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
-def json_data(cid: str, text: str, is_start: bool = False, is_end: bool = False, is_emergency: bool = False, is_error: bool = False) -> str:
-    import json
-    return json.dumps({
-        "conversation_id": cid,
-        "text": text,
-        "is_start": is_start,
-        "is_end": is_end,
-        "is_emergency": is_emergency,
-        "is_error": is_error
-    })
+
+def json_data(
+    cid: str,
+    text: str,
+    is_start: bool = False,
+    is_end: bool = False,
+    is_emergency: bool = False,
+    is_error: bool = False,
+) -> str:
+    return json.dumps(
+        {
+            "conversation_id": cid,
+            "text": text,
+            "is_start": is_start,
+            "is_end": is_end,
+            "is_emergency": is_emergency,
+            "is_error": is_error,
+        }
+    )
+
 
 @app.post("/api/report/generate")
-def generate_report_endpoint(data: ReportGenerateModel):
+def generate_report_endpoint(data: ReportGenerateModel, user: dict = Depends(get_current_user)):
+    ownership = verify_conversation_ownership(data.conversation_id, user["id"])
+    if ownership == "forbidden":
+        raise HTTPException(status_code=403, detail="Access denied: You do not own this conversation.")
+    if ownership == "not_found":
+        raise HTTPException(status_code=404, detail="Conversation not found.")
     try:
-        report_id = generate_pdf_report(data.conversation_id)
+        report_id = generate_pdf_report(data.conversation_id, user_id=user["id"])
         return {"status": "success", "report_id": report_id, "download_url": f"/api/report/download/{report_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF report generation failed: {str(e)}")
 
+
 @app.get("/api/report/download/{report_id}")
-def download_report_endpoint(report_id: str):
+def download_report_endpoint(report_id: str, user: dict = Depends(get_current_user)):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT file_path FROM reports WHERE id = ?", (report_id,))
+    cursor.execute("SELECT file_path, user_id FROM reports WHERE id = ?", (report_id,))
     row = cursor.fetchone()
     conn.close()
-    
-    if not row or not os.path.exists(row["file_path"]):
+
+    if not row:
         raise HTTPException(status_code=404, detail="Report file not found.")
-        
+    if row["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied: You do not own this medical report.")
+    if not os.path.exists(row["file_path"]):
+        raise HTTPException(status_code=404, detail="Report file not found on disk.")
+
     return FileResponse(
         path=row["file_path"],
         filename=os.path.basename(row["file_path"]),
-        media_type="application/pdf"
+        media_type="application/pdf",
     )
+
 
 # Static files for Frontend
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
@@ -384,6 +565,7 @@ if os.path.exists(FRONTEND_DIR):
 
 if __name__ == "__main__":
     import uvicorn
+
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "0.0.0.0")
     uvicorn.run("backend.main:app", host=host, port=port, reload=False)
