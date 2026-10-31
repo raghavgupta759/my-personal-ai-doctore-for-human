@@ -1,0 +1,10 @@
+{
+  "name": "Personal AI Doctor",
+  "description": "Clinical-grade AI medical symptom analyzer, diagnostic assistant, and 24/7 interactive Ask AI doctor consultation platform.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

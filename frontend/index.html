@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal AI Doctor — Intelligent Healthcare & Symptom Assessment</title>
+    <meta name="description" content="Personal AI Doctor with structured 5-step symptom check, personalized diet & medicine guidance, home remedies, and context-aware floating AI Assistant.">
+    <meta property="og:title" content="Personal AI Doctor — Intelligent Healthcare & Symptom Assessment">
+    <meta property="og:description" content="Personal AI Doctor with structured 5-step symptom check, personalized diet & medicine guidance, home remedies, and context-aware floating AI Assistant.">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="light-theme">
+    
+    <!-- PREMIUM AI DOCTOR INTRODUCTION / WELCOME SCREEN -->
+    <div id="appSplashScreen" class="splash-screen-overlay">
+
+        <!-- BACKGROUND PARTICLES -->
+        <div class="splash-particles" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+
+        <!-- SKIP INTRO BUTTON — TOP RIGHT -->
+        <button id="splashSkipBtn" class="splash-skip-link" title="Skip Intro">
+            Skip Intro ⏭
+        </button>
+
+        <!-- CENTER CONTENT -->
+        <div class="splash-center-stage">
+
+            <!-- DOCTOR CIRCULAR AVATAR WITH ARC RING -->
+            <div class="doctor-ring-wrapper" id="doctorAvatarWrapper">
+                <!-- SVG spinning arc/progress ring -->
+                <svg class="arc-ring-svg" viewBox="0 0 260 260" xmlns="http://www.w3.org/2000/svg">
+                    <circle class="arc-bg"   cx="130" cy="130" r="120" />
+                    <circle class="arc-glow" cx="130" cy="130" r="120" id="arcProgress" />
+                </svg>
+                <!-- Circular doctor portrait -->
+                <div class="doctor-circle-frame">
+                    <img src="images/doctor_intro.png" alt="AI Doctor" class="doctor-portrait-img" id="doctorPortraitImg">
+                </div>
+                <!-- Glowing dot on arc top -->
+                <div class="arc-dot" id="arcDot"></div>
+            </div>
+
+            <!-- LOADING STATUS -->
+            <div class="splash-loading-row" id="splashLoadingRow">
+                <span class="loading-label" id="loadingLabel">Loading...</span>
+                <span class="loading-percent" id="loadingPercent">0%</span>
+            </div>
+
+            <!-- MAIN WELCOME TITLE -->
+            <h1 class="splash-welcome-title" id="introGreetingTitle">
+                Welcome to <span class="splash-brand-highlight">Personal AI Doctor</span>
+            </h1>
+
+            <!-- SUBTITLE -->
+            <p class="splash-welcome-sub" id="introGreetingSub">
+                Your AI-powered health companion is ready to help you.
+            </p>
+
+            <!-- SOUNDWAVE DOTS (visible while speaking) -->
+            <div class="splash-soundwave-row" id="soundwaveVisualizer">
+                <span class="sw-dot"></span><span class="sw-dot"></span><span class="sw-dot"></span>
+                <span class="sw-bar"></span><span class="sw-bar"></span><span class="sw-bar"></span>
+                <span class="sw-bar"></span><span class="sw-bar"></span><span class="sw-bar"></span>
+                <span class="sw-dot"></span><span class="sw-dot"></span><span class="sw-dot"></span>
+            </div>
+
+            <!-- SPEAKING STATUS PILL -->
+            <div class="splash-speaking-pill" id="splashStatusPill">
+                <span class="speaking-dot"></span>
+                <span id="splashProgressText">AI Doctor is speaking...</span>
+            </div>
+
+            <!-- AUTOPLAY FALLBACK BUTTON (hidden by default) -->
+            <button id="tapToSpeakBtn" class="tap-fallback-btn hidden">
+                🔊 Tap to hear AI Doctor
+            </button>
+
+        </div>
+    </div>
+
+
+    <!-- MAIN APPLICATION LAYOUT -->
+    <div class="app-layout">
+        
+        <!-- SIDEBAR DRAWER -->
+        <aside id="sidebarDrawer" class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <div class="brand-icon"><i data-lucide="heart-pulse"></i></div>
+                    <div class="brand-text">
+                        <h1>AI Doctor</h1>
+                        <span class="brand-sub">Smart Personal Healthcare</span>
+                    </div>
+                </div>
+                <button id="closeSidebarBtn" class="icon-btn" title="Close Sidebar"><i data-lucide="x"></i></button>
+            </div>
+
+            <!-- PATIENT PROFILE SECTION -->
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <i data-lucide="user"></i> Saved Patient Profile
+                </div>
+                <form id="profileForm" class="profile-card">
+                    <div class="form-group">
+                        <label for="profileName">Patient Name</label>
+                        <input type="text" id="profileName" placeholder="e.g. Raghav" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="profileAge">Age</label>
+                            <input type="number" id="profileAge" min="1" max="120" value="25" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="profileGender">Gender</label>
+                            <select id="profileGender">
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="profileHeight">Height</label>
+                            <input type="text" id="profileHeight" placeholder="e.g. 5 ft 9 in / 175 cm">
+                        </div>
+                        <div class="form-group">
+                            <label for="profileWeight">Weight</label>
+                            <input type="text" id="profileWeight" placeholder="e.g. 70 kg / 154 lbs">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="profileLocation">City / Location</label>
+                        <input type="text" id="profileLocation" placeholder="e.g. Mumbai, Delhi">
+                    </div>
+                    <div class="form-group">
+                        <label for="profileAllergies">Known Allergies</label>
+                        <input type="text" id="profileAllergies" placeholder="e.g. Penicillin, Dust, None">
+                    </div>
+                    <div class="form-group">
+                        <label for="profileChronic">Chronic Conditions</label>
+                        <input type="text" id="profileChronic" placeholder="e.g. Asthma, Diabetes, None">
+                    </div>
+                    <button type="submit" class="btn btn-secondary btn-sm full-width">
+                        <i data-lucide="save"></i> Update Profile
+                    </button>
+                </form>
+            </div>
+
+            <!-- PAST CONSULTATIONS HISTORY -->
+            <div class="sidebar-section history-section">
+                <div class="section-title">
+                    <i data-lucide="history"></i> Past Consultations
+                </div>
+                <div id="historyList" class="history-list">
+                    <div class="empty-state">No previous consultations.</div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="signature">Made by Raghav • Privacy-First</div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="main-content">
+            
+            <!-- GLOBAL HEADER BAR -->
+            <header class="app-header">
+                <div class="header-left">
+                    <button id="openSidebarBtn" class="icon-btn" title="Open Menu"><i data-lucide="menu"></i></button>
+                    <div class="brand-logo-header" id="navLogoBtn" style="cursor: pointer;">
+                        <i data-lucide="stethoscope" class="brand-icon-nav"></i>
+                        <span class="brand-title-nav">Personal AI Doctor</span>
+                    </div>
+                </div>
+
+                <div class="header-right">
+                    <!-- LANGUAGE SELECTOR PILLS -->
+                    <div class="lang-selector-group" id="globalLangSelector">
+                        <button type="button" class="lang-pill active" data-lang="english" title="English Language">🇬🇧 EN</button>
+                        <button type="button" class="lang-pill" data-lang="hindi" title="हिंदी भाषा">🇮🇳 हिंदी</button>
+                        <button type="button" class="lang-pill" data-lang="hinglish" title="Hinglish Language">💬 Hinglish</button>
+                    </div>
+
+                    <!-- THEME TOGGLE BUTTON -->
+                    <button id="themeToggleBtn" class="icon-btn-text" title="Toggle Light/Dark Theme">
+                        <i data-lucide="moon" id="themeIcon"></i>
+                        <span class="btn-text-hide-mobile">Dark</span>
+                    </button>
+
+                    <!-- VOICE SPEECH TOGGLE -->
+                    <div class="tts-controls">
+                        <button id="stopSpeechBtn" class="btn btn-danger btn-sm hidden">
+                            <i data-lucide="square"></i> Stop
+                        </button>
+                        <label class="tts-toggle" title="Toggle AI Voice Response">
+                            <input type="checkbox" id="ttsToggle" checked>
+                            <span class="slider"></span>
+                            <i data-lucide="volume-2" class="voice-on-icon"></i>
+                        </label>
+                    </div>
+
+                    <button id="navHealthCheckBtn" class="btn btn-primary btn-sm shine-effect">
+                        <i data-lucide="activity"></i> <span>Start Health Check</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- CONTAINER FOR PAGES -->
+            <div class="page-container">
+                
+                <!-- ========================================== -->
+                <!-- PAGE 1 — LANDING PAGE WITH INTEGRATED 3D HERO -->
+                <!-- ========================================== -->
+                <section id="pageLanding" class="page-view active">
+                    <div class="landing-hero-card">
+                        <div class="hero-content-wrapper">
+                            <div class="hero-badge">
+                                <i data-lucide="sparkles" class="pulse-icon"></i>
+                                <span>Personal AI Doctor v3.0</span>
+                            </div>
+                            <h1>Welcome to My Personal AI Doctor</h1>
+                            <p class="hero-subheading">Your private, intelligent health assistant for instant symptom evaluation, personalized recovery guidance, and medical AI advice in <strong>English, Hindi (हिंदी), and Hinglish</strong>.</p>
+                            
+                            <div class="hero-cta-group">
+                                <button id="startCheckCtaBtn" class="btn btn-primary btn-hero shine-effect">
+                                    <i data-lucide="stethoscope"></i>
+                                    <span>Start Health Check</span>
+                                    <i data-lucide="arrow-right"></i>
+                                </button>
+                                <button id="heroOpenChatBtn" class="btn btn-secondary btn-hero">
+                                    <i data-lucide="bot"></i>
+                                    <span>Talk to AI Doctor</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- TRUST-BUILDING VISUAL CARDS -->
+                    <div class="trust-grid">
+                        <div class="trust-card">
+                            <div class="trust-icon bg-blue"><i data-lucide="stethoscope"></i></div>
+                            <h3>Structured 5-Step Intake</h3>
+                            <p>Simple guided check for symptoms, duration, recent foods, severity score &amp; medical history.</p>
+                        </div>
+                        <div class="trust-card">
+                            <div class="trust-icon bg-teal"><i data-lucide="activity"></i></div>
+                            <h3>Personalized Recovery</h3>
+                            <p>Instant condition likelihoods, OTC medicine options, diet plan &amp; rest timeline.</p>
+                        </div>
+                        <div class="trust-card">
+                            <div class="trust-icon bg-purple"><i data-lucide="bot"></i></div>
+                            <h3>ChatGPT-Style AI Assistant</h3>
+                            <p>Conversational chat assistant with natural intent switching and optional voice output.</p>
+                        </div>
+                    </div>
+
+                    <!-- SMALL DISCLAIMER FOOTER -->
+                    <footer class="landing-footer-disclaimer">
+                        <i data-lucide="info"></i>
+                        <span>This tool provides general health guidance and is not a substitute for professional medical advice.</span>
+                    </footer>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- PAGE 2 — DATA COLLECTION (MULTI-STEP FORM) -->
+                <!-- ========================================== -->
+                <section id="pageIntake" class="page-view">
+                    <div class="intake-card">
+                        
+                        <!-- PROGRESS BAR & STEP INDICATOR -->
+                        <div class="step-progress-wrapper">
+                            <div class="step-header-info">
+                                <span class="step-badge" id="stepBadgeText">Step 1 of 5</span>
+                                <h2 class="step-title" id="stepTitleText">Basic Information</h2>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" id="progressBarFill" style="width: 20%;"></div>
+                            </div>
+                            <div class="step-dots-row">
+                                <span class="step-dot active" data-step="1">1</span>
+                                <span class="step-dot" data-step="2">2</span>
+                                <span class="step-dot" data-step="3">3</span>
+                                <span class="step-dot" data-step="4">4</span>
+                                <span class="step-dot" data-step="5">5</span>
+                            </div>
+                        </div>
+
+                        <!-- MULTI-STEP FORM BODY -->
+                        <form id="multiStepForm" class="multi-step-form">
+                            
+                            <!-- STEP 1: BASIC INFO -->
+                            <div class="form-step-content active" data-step="1">
+                                <div class="step-intro">
+                                    <i data-lucide="user-check"></i>
+                                    <div>
+                                        <h3>Let's start with your basic info</h3>
+                                        <p>Please share your name, age, and location for personalized guidance.</p>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="stepName">Full Name <span class="req">*</span></label>
+                                    <input type="text" id="stepName" placeholder="e.g. Raghav Sharma" required>
+                                </div>
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="stepAge">Age <span class="req">*</span></label>
+                                        <input type="number" id="stepAge" min="1" max="120" value="25" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="stepGender">Gender <span class="req">*</span></label>
+                                        <select id="stepGender" required>
+                                            <option value="Male">Male</option>
+                                            <option value="Female">Female</option>
+                                            <option value="Other">Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="stepLocation">City / Location</label>
+                                    <input type="text" id="stepLocation" placeholder="e.g. Mumbai, Delhi, Bangalore">
+                                </div>
+                            </div>
+
+                            <!-- STEP 2: CURRENT PROBLEM -->
+                            <div class="form-step-content" data-step="2">
+                                <div class="step-intro">
+                                    <i data-lucide="alert-circle"></i>
+                                    <div>
+                                        <h3>What symptom or illness are you facing?</h3>
+                                        <p>Select your symptoms from common options or add your own.</p>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="section-label">Select Symptoms (Multiple allowed):</label>
+                                    <div class="symptom-chips-grid" id="symptomChipsGrid">
+                                        <button type="button" class="symptom-chip" data-symptom="Fever">🌡️ Fever (Bukhar)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="High Fever">🤒 High Fever (&gt;101°F)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Headache">💆 Headache (Sar Dard)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Cough">😷 Cough (Khasi)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Sore Throat">🗣️ Sore Throat (Kharash)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Stomach Pain">🤢 Stomach Pain (Pet dard)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Vomiting">🤮 Vomiting (Ulti)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Diarrhea">🏃 Loose Motion / Diarrhea</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Acidity">💥 Acidity &amp; Gas</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Body Ache">🦵 Body Pain (Badan dard)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Weakness">🥱 Fatigue (Kamzori)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Dizziness">💫 Dizziness (Chakkar)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Chills">🥶 Chills (Thand lagna)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Runny Nose">🤧 Cold &amp; Runny Nose</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Skin Rash">🩸 Skin Rash (Dane)</button>
+                                        <button type="button" class="symptom-chip" data-symptom="Red Eyes">👁️ Red / Watery Eyes</button>
+                                    </div>
+                                    
+                                    <div class="custom-symptom-box">
+                                        <input type="text" id="customSymptomInput" placeholder="+ Type custom symptom (e.g. Joint stiffness, Nausea)...">
+                                        <button type="button" id="addCustomSymptomBtn" class="btn btn-secondary btn-sm">
+                                            <i data-lucide="plus"></i> Add
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="form-row-2col">
+                                    <div class="form-group">
+                                        <label for="stepDuration"><i data-lucide="clock"></i> Duration</label>
+                                        <select id="stepDuration">
+                                            <option value="Today / 1 Day">Today / 1 Day</option>
+                                            <option value="2 to 3 Days" selected>2 to 3 Days</option>
+                                            <option value="4 to 7 Days">4 to 7 Days</option>
+                                            <option value="More than 1 Week">&gt; 1 Week</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="stepTrajectory"><i data-lucide="trending-up"></i> Symptom Trend</label>
+                                        <select id="stepTrajectory">
+                                            <option value="Getting worse">Getting Worse</option>
+                                            <option value="Unchanged" selected>Unchanged / Same</option>
+                                            <option value="Getting better">Getting Better</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- STEP 3: CONTEXT & MEDICATIONS -->
+                            <div class="form-step-content" data-step="3">
+                                <div class="step-intro">
+                                    <i data-lucide="utensils"></i>
+                                    <div>
+                                        <h3>Context &amp; Medical History</h3>
+                                        <p>Recent food, activities, allergies, or underlying conditions.</p>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="stepRecentFood">Recent food or activity before symptoms started?</label>
+                                    <input type="text" id="stepRecentFood" placeholder="e.g. Ate street food, ice cream, heavy gym workout, cold rain exposure...">
+                                    <div class="quick-chips-row">
+                                        <button type="button" class="quick-text-chip" data-target="stepRecentFood" data-val="Street food / Outside meal">🌮 Street Food</button>
+                                        <button type="button" class="quick-text-chip" data-target="stepRecentFood" data-val="Cold sodas / Ice cream">🍦 Cold drinks/Ice cream</button>
+                                        <button type="button" class="quick-text-chip" data-target="stepRecentFood" data-val="Rain / Cold weather exposure">🌧️ Rain/Cold exposure</button>
+                                        <button type="button" class="quick-text-chip" data-target="stepRecentFood" data-val="Normal home food">🍲 Normal home food</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="stepCurrentMedications"><i data-lucide="pill"></i> Current Medications (If any)</label>
+                                    <input type="text" id="stepCurrentMedications" placeholder="e.g. Paracetamol 500mg, Cetirizine, Inhaler, None">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="stepAllergies">Any Known Allergies?</label>
+                                    <input type="text" id="stepAllergies" placeholder="e.g. Penicillin, Dust, Peanuts, None">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="section-label">Existing Chronic Conditions (Optional):</label>
+                                    <div class="checkbox-chips-grid">
+                                        <label class="checkbox-chip"><input type="checkbox" name="chronicCondition" value="Diabetes"> Diabetes</label>
+                                        <label class="checkbox-chip"><input type="checkbox" name="chronicCondition" value="High BP"> High Blood Pressure</label>
+                                        <label class="checkbox-chip"><input type="checkbox" name="chronicCondition" value="Asthma"> Asthma / Respiratory</label>
+                                        <label class="checkbox-chip"><input type="checkbox" name="chronicCondition" value="Thyroid"> Thyroid</label>
+                                        <label class="checkbox-chip"><input type="checkbox" name="chronicCondition" value="Heart Disease"> Heart Disease</label>
+                                        <label class="checkbox-chip"><input type="checkbox" name="chronicCondition" value="Migraine"> Migraine</label>
+                                        <label class="checkbox-chip"><input type="checkbox" name="chronicCondition" value="None" checked> None</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- STEP 4: SEVERITY & ADDITIONAL SYMPTOMS -->
+                            <div class="form-step-content" data-step="4">
+                                <div class="step-intro">
+                                    <i data-lucide="bar-chart-2"></i>
+                                    <div>
+                                        <h3>Severity &amp; Additional Discomfort</h3>
+                                        <p>Rate your discomfort level from 1 to 10.</p>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <div class="slider-label-row">
+                                        <label for="severitySlider">Pain / Discomfort Scale (1–10)</label>
+                                        <span id="severityScoreBadge" class="severity-badge score-moderate">5 / 10 (Moderate)</span>
+                                    </div>
+                                    <input type="range" id="severitySlider" min="1" max="10" value="5" class="severity-slider">
+                                    <div class="slider-ticks">
+                                        <span>1 (Mild)</span>
+                                        <span>5 (Moderate)</span>
+                                        <span>10 (Severe)</span>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="stepNotes">Additional Notes / Description (Hindi, Hinglish, or English)</label>
+                                    <textarea id="stepNotes" rows="3" placeholder="Describe how you feel (e.g. 2 din se tez bukhar hai aur raat ko thand lagti hai)..."></textarea>
+                                </div>
+                            </div>
+
+                            <!-- STEP 5: REVIEW & SUBMIT -->
+                            <div class="form-step-content" data-step="5">
+                                <div class="step-intro">
+                                    <i data-lucide="check-square"></i>
+                                    <div>
+                                        <h3>Review Your Intake Summary</h3>
+                                        <p>Double check your information before generating your ML assessment.</p>
+                                    </div>
+                                </div>
+
+                                <div id="reviewSummaryCard" class="review-summary-box">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+
+                            <!-- STEP NAVIGATION BUTTONS -->
+                            <div class="step-actions">
+                                <button type="button" id="prevStepBtn" class="btn btn-outline btn-sm hidden">
+                                    <i data-lucide="chevron-left"></i> Previous Step
+                                </button>
+                                <div class="spacer"></div>
+                                <button type="button" id="nextStepBtn" class="btn btn-primary btn-md">
+                                    <span>Next Step</span>
+                                    <i data-lucide="chevron-right"></i>
+                                </button>
+                                <button type="submit" id="submitAssessmentBtn" class="btn btn-primary btn-md shine-effect hidden">
+                                    <span>✨ Analyze Symptoms</span>
+                                    <i data-lucide="sparkles"></i>
+                                </button>
+                            </div>
+
+                        </form>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- LOADING OVERLAY MODAL -->
+                <!-- ========================================== -->
+                <div id="loadingOverlay" class="loading-overlay hidden">
+                    <div class="loader-box">
+                        <div class="pulse-ring-large"></div>
+                        <i data-lucide="cpu" class="loader-icon"></i>
+                        <h3>Analyzing Symptoms...</h3>
+                        <p>Matching symptoms against local ML model &amp; retrieving medical guidance.</p>
+                    </div>
+                </div>
+
+                <!-- ========================================== -->
+                <!-- PAGE 3 — RESULTS / PREDICTION PAGE -->
+                <!-- ========================================== -->
+                <section id="pageResults" class="page-view">
+                    <div class="results-container" id="resultsContainer">
+                        <!-- Populated dynamically by app.js -->
+                    </div>
+                </section>
+
+            </div>
+        </main>
+
+        <!-- FLOATING CHAT WIDGET TRIGGER BUTTON (PERSISTENT AFTER LANDING) -->
+        <button id="floatingChatBtn" class="floating-chat-btn" title="Open AI Doctor Assistant">
+            <div class="btn-glow"></div>
+            <i data-lucide="bot"></i>
+            <span>Ask AI</span>
+            <span id="chatBadge" class="chat-badge hidden">1</span>
+        </button>
+
+        <!-- MOBILE / TABLET DRAWER BACKDROP OVERLAY -->
+        <div id="drawerBackdrop" class="drawer-backdrop hidden" aria-hidden="true"></div>
+
+        <!-- FLOATING AI DOCTOR SIDE-CHAT DRAWER / SHEET -->
+        <div id="sideChatDrawer" class="side-chat-drawer" role="dialog" aria-label="AI Doctor Assistant">
+            <div class="drawer-header">
+                <div class="drawer-header-top">
+                    <div class="drawer-brand">
+                        <div class="bot-avatar"><i data-lucide="bot"></i></div>
+                        <div class="drawer-brand-text">
+                            <h3>AI Doctor Assistant</h3>
+                            <span id="chatContextSubtext" class="context-subtext">🧠 General AI Assistant</span>
+                        </div>
+                    </div>
+                    <!-- CLEARLY VISIBLE TOP-RIGHT CLOSE (X) BUTTON -->
+                    <button type="button" id="closeChatDrawerBtn" class="icon-btn drawer-close-btn" title="Close Ask AI" aria-label="Close Ask AI">
+                        <svg class="close-x-svg" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="drawer-header-actions">
+                    <!-- CHAT LANGUAGE SELECTOR PILLS -->
+                    <div class="drawer-lang-group" id="chatLangSelector">
+                        <button type="button" class="lang-pill-sm active" data-lang="english" title="English">EN</button>
+                        <button type="button" class="lang-pill-sm" data-lang="hindi" title="हिंदी">हिंदी</button>
+                        <button type="button" class="lang-pill-sm" data-lang="hinglish" title="Hinglish">Hinglish</button>
+                    </div>
+
+                    <div class="drawer-utility-btns">
+                        <!-- TEXT-ONLY VS TEXT+VOICE TOGGLE BUTTON -->
+                        <button type="button" id="voiceToggleBtn" class="voice-toggle-btn text-only" title="Toggle AI Voice Output (Text-Only / Text+Voice)">
+                            <i data-lucide="volume-x" id="voiceToggleIcon"></i>
+                            <span id="voiceToggleText">Text Only</span>
+                        </button>
+                        <!-- CLEAR CHAT CONTEXT BUTTON -->
+                        <button type="button" id="clearChatBtn" class="icon-btn icon-btn-sm" title="Clear Chat Context">
+                            <i data-lucide="trash-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CHAT MESSAGES STREAM -->
+            <div id="drawerChatMessages" class="drawer-chat-messages">
+                <div class="message assistant-message">
+                    <div class="avatar"><i data-lucide="bot"></i></div>
+                    <div class="message-content">
+                        <div class="speaker-tag">AI Doctor</div>
+                        <p>Namaste! I am your <strong>Personal AI Doctor</strong>. How are you feeling today? Ask me any question or start a Health Check!</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUGGESTED QUESTIONS CHIPS -->
+            <div id="chatSuggestionsRow" class="chat-suggestions-row">
+                <button type="button" class="chat-suggest-chip" data-prompt="Explain my assessment in simple language">Explain my assessment</button>
+                <button type="button" class="chat-suggest-chip" data-prompt="What symptoms should I monitor?">What to monitor?</button>
+                <button type="button" class="chat-suggest-chip" data-prompt="When should I see a doctor immediately?">When to see a doctor?</button>
+                <button type="button" class="chat-suggest-chip" data-prompt="What foods should I eat and avoid?">Diet advice</button>
+            </div>
+
+            <!-- CHAT INPUT DOCK -->
+            <div class="drawer-input-dock">
+                <form id="drawerChatForm" class="input-form">
+                    <button type="button" id="attachReportBtn" class="mic-btn" title="Upload / Paste Medical Report" style="background: rgba(56, 189, 248, 0.15); color: var(--accent-primary);">
+                        <i data-lucide="file-plus"></i>
+                    </button>
+                    <button type="button" id="micBtn" class="mic-btn" title="Speak message">
+                        <i data-lucide="mic"></i>
+                        <span class="pulse-ring"></span>
+                    </button>
+                    <input type="text" id="drawerUserInput" placeholder="Ask AI anything (e.g. What should I eat for fever?)..." autocomplete="off" required>
+                    <button type="submit" id="drawerSendBtn" class="send-btn" title="Send">
+                        <i data-lucide="send"></i>
+                    </button>
+                </form>
+                <div class="drawer-disclaimer">
+                    ⚠️ AI guidance summary. In emergency, call <strong>112 / 108</strong>.
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- MEDICAL REPORT UPLOAD / PASTE MODAL -->
+    <div id="uploadReportModal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i data-lucide="file-spreadsheet" style="color:var(--accent-primary);"></i>
+                    <h3>Provide Medical Report / Lab Results</h3>
+                </div>
+                <button type="button" id="closeUploadReportModalBtn" class="icon-btn"><i data-lucide="x"></i></button>
+            </div>
+            <form id="reportUploadForm" class="modal-body">
+                <div class="form-group">
+                    <label for="reportNameInput">Report Title / Type</label>
+                    <input type="text" id="reportNameInput" placeholder="e.g. Complete Blood Count (CBC) / Thyroid Profile" value="Blood Test Report">
+                </div>
+                <div class="form-group">
+                    <label for="reportTextInput">Paste Report Text or Lab Test Values</label>
+                    <textarea id="reportTextInput" rows="6" placeholder="e.g. Hemoglobin: 13.5 g/dL&#10;WBC: 11500 /uL&#10;Platelets: 2.2 Lakhs&#10;Fasting Glucose: 95 mg/dL" required></textarea>
+                    <span style="font-size:0.75rem; color:var(--text-muted);">Paste test values or report summary text. AI will structure and save it to your profile context.</span>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
+                    <button type="button" id="cancelReportModalBtn" class="btn btn-outline btn-sm">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm shine-effect">
+                        <i data-lucide="check-circle"></i> Save Report to Context
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- PAST CONSULTATION SUMMARY EXPANDABLE MODAL -->
+    <div id="consultationModal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i data-lucide="file-text"></i>
+                    <h3>Past Consultation Summary</h3>
+                </div>
+                <button type="button" id="closeConsultationModalBtn" class="icon-btn"><i data-lucide="x"></i></button>
+            </div>
+            <div id="consultationModalBody" class="modal-body">
+                <!-- Summary card content dynamically injected -->
+            </div>
+        </div>
+    </div>
+
+    <!-- AUDIO EQUALIZER INDICATOR -->
+    <div id="audioVisualizer" class="audio-visualizer hidden">
+        <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        <span>AI Doctor Speaking...</span>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script>
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    </script>
+</body>
+</html>

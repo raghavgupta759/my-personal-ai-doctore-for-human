@@ -1,0 +1,19 @@
+# Normalize line endings for cross-platform consistency
+* text=auto
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.sh text eol=lf
+
+# Binary files
+*.pkl binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.db binary

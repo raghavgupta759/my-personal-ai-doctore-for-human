@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: personal-ai-doctor
+    runtime: python
+    pythonVersion: "3.12"
+
+    # Build: install deps + train ML classifier
+    buildCommand: "pip install -r requirements.txt && python ml/train_classifier.py"
+
+    # Start: uvicorn with $PORT injected by Render
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+
+    # Health check � FastAPI /health endpoint
+    healthCheckPath: /health
+
+    envVars:
+      # -- Google Gemini AI (PRIMARY � REQUIRED) ------------------------------
+      # Get your free API key at: https://aistudio.google.com/apikey
+      # Set this in the Render dashboard � NEVER hardcode it in source code
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # Gemini model to use � gemini-1.5-flash is universally supported
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest

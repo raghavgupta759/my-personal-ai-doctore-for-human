@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  ai-doctor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: personal_ai_doctor
+    ports:
+      - "8000:8000"
+    environment:
+      # Set your Gemini API key here for local Docker testing
+      # Or create a .env file and use env_file: [.env]
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
+    volumes:
+      - ./reports:/app/reports
+      - ./ml/model_artifacts:/app/ml/model_artifacts
+    restart: unless-stopped

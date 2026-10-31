@@ -1,0 +1,40 @@
+# Python & Virtual Env
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Environment Variables & Secrets
+.env
+*.pem
+*.key
+*.cert
+
+# Database (ephemeral on Render — do not commit)
+*.db
+backend/db/*.db
+backend/db/doctor.db
+
+# Generated PDF Reports (ephemeral on Render — do not commit)
+reports/*.pdf
+reports/
+
+# NOTE: ml/model_artifacts/*.pkl IS tracked in git.
+# Render trains them via `python ml/train_classifier.py` at build time,
+# but we keep them for local development without a build step.
+
+# IDE & OS Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node (future frontend tooling)
+node_modules/
