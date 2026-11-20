@@ -330,7 +330,17 @@ function getOrCreateProfile(user) {
 // ---------------------------------------------------------------------------
 // Health & Auth Routes
 // ---------------------------------------------------------------------------
-const ACTIVE_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const RETIRED_MODELS = new Set([
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-pro',
+  'gemini-2.0-flash',
+  'gemini-2.0-pro',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+]);
+const envModel = (process.env.GEMINI_MODEL || '').trim();
+const ACTIVE_MODEL = !envModel || RETIRED_MODELS.has(envModel) ? 'gemini-3.8-flash' : envModel;
 
 app.get(['/health', '/api/health'], (_req, res) => {
   res.json({
