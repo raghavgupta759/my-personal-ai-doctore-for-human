@@ -687,19 +687,42 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       parts: [{ text: m.content }],
     }));
 
-    const stream = await ai.models.generateContentStream({
-      model: ACTIVE_MODEL,
-      contents,
-      config: { systemInstruction, maxOutputTokens: 1024 },
-    });
+    const candidateModels = [...new Set([
+      ACTIVE_MODEL,
+      'gemini-flash-lite-latest',
+      'gemini-flash-latest',
+      'gemini-3.1-flash-lite',
+      'gemini-3-flash-preview',
+    ].filter(Boolean))];
 
     let collected = '';
-    for await (const chunk of stream) {
-      const text = chunk.text || '';
-      if (text) {
-        collected += text;
-        res.write(sseEvent({ conversation_id: conversationId, text, is_start: false, is_end: false, is_emergency: false, is_error: false }));
+    let lastError = null;
+    for (const modelName of candidateModels) {
+      try {
+        const stream = await ai.models.generateContentStream({
+          model: modelName,
+          contents,
+          config: { systemInstruction, maxOutputTokens: 1024 },
+        });
+
+        for await (const chunk of stream) {
+          const text = chunk.text || '';
+          if (text) {
+            collected += text;
+            res.write(sseEvent({ conversation_id: conversationId, text, is_start: false, is_end: false, is_emergency: false, is_error: false }));
+          }
+        }
+        lastError = null;
+        break;
+      } catch (modelErr) {
+        lastError = modelErr;
+        console.warn(`[Chat Gemini] Model ${modelName} failed (${modelErr.status || modelErr.message}), trying fallback...`);
+        if (collected) break; // Already streamed partial text
       }
+    }
+
+    if (lastError && !collected) {
+      throw lastError;
     }
 
     if (collected) {
@@ -709,10 +732,15 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     res.end();
   } catch (err) {
     console.error('[Chat Gemini Error]:', err);
+    const errText = String(err.message || '');
+    const friendly =
+      errText.includes('503') || errText.includes('UNAVAILABLE')
+        ? '⚠️ AI server abhi high demand par hai. Kripya kuch seconds baad dobara try karein.'
+        : `⚠️ AI service error: ${errText || 'Unable to generate response.'}`;
     res.write(
       sseEvent({
         conversation_id: conversationId,
-        text: `⚠️ AI service error: ${err.message || 'Unable to generate response.'}`,
+        text: friendly,
         is_start: false,
         is_end: true,
         is_emergency: false,
