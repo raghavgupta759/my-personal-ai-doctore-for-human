@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -244,6 +245,22 @@ const KNOWLEDGE_BASE = {
 };
 
 function predictTop3(symptoms = [], notes = '') {
+  try {
+    const payload = JSON.stringify({ symptoms, notes });
+    const resultBuffer = execSync(`python3 ML/src/run_inference.py`, {
+      input: payload,
+      timeout: 5000,
+      encoding: 'utf-8',
+    });
+    const parsed = JSON.parse(resultBuffer.trim());
+    if (parsed && parsed.top3 && parsed.top3.length > 0) {
+      return { top3: parsed.top3, topConf: parsed.top_confidence || parsed.top3[0].confidence };
+    }
+  } catch (err) {
+    console.warn('[ML Inference Subprocess Warning]:', err.message);
+  }
+
+  // Fallback rule-based scores if ML process fails
   const text = `${symptoms.join(' ')} ${notes}`.toLowerCase();
   const scores = [
     {
