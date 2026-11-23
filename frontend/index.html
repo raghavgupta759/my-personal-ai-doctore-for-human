@@ -209,9 +209,10 @@
                         <div class="form-group">
                             <label for="profileGender">Gender</label>
                             <select id="profileGender">
-                                <option value="Male">Male</option>
+                                <option value="Male" selected>Male</option>
                                 <option value="Female">Female</option>
                                 <option value="Other">Other</option>
+                                <option value="Not specified">Not specified / Prefer not to say</option>
                             </select>
                         </div>
                     </div>
@@ -394,7 +395,7 @@
                         </div>
 
                         <!-- MULTI-STEP FORM BODY -->
-                        <form id="multiStepForm" class="multi-step-form">
+                        <form id="multiStepForm" class="multi-step-form" novalidate>
                             
                             <!-- STEP 1: BASIC INFO -->
                             <div class="form-step-content active" data-step="1">
@@ -407,19 +408,20 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="stepName">Full Name <span class="req">*</span></label>
-                                    <input type="text" id="stepName" placeholder="e.g. Raghav Sharma" required>
+                                    <input type="text" id="stepName" placeholder="e.g. Raghav Sharma">
                                 </div>
                                 <div class="form-row-2col">
                                     <div class="form-group">
                                         <label for="stepAge">Age <span class="req">*</span></label>
-                                        <input type="number" id="stepAge" min="1" max="120" value="25" required>
+                                        <input type="number" id="stepAge" min="1" max="120" value="25">
                                     </div>
                                     <div class="form-group">
                                         <label for="stepGender">Gender <span class="req">*</span></label>
-                                        <select id="stepGender" required>
-                                            <option value="Male">Male</option>
+                                        <select id="stepGender">
+                                            <option value="Male" selected>Male</option>
                                             <option value="Female">Female</option>
                                             <option value="Other">Other</option>
+                                            <option value="Not specified">Not specified / Prefer not to say</option>
                                         </select>
                                     </div>
                                 </div>

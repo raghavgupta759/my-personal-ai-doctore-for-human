@@ -5,8 +5,14 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
 import { GoogleGenAI } from '@google/genai';
+import {
+  checkRedFlags,
+  checkRedFlagsInIntake,
+  predictTop3,
+  getConditionKnowledge,
+  getAllLanguageKnowledge,
+} from './ml_engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,279 +37,24 @@ const diagnosesByConv = new Map(); // conversationId -> latest diagnosis
 const labReportsByUser = new Map(); // userId -> Array<report>
 const generatedReports = new Map(); // reportId -> { user_id, filename, content }
 
-// ---------------------------------------------------------------------------
-// Safety Guard (Emergency Red Flags)
-// ---------------------------------------------------------------------------
-const RED_FLAG_PATTERNS = [
-  /\bchest\s*pain\b/i, /\bheart\s*attack\b/i, /\bchhati\s*(mein|me)\s*dard\b/i,
-  /\bchaati\s*dard\b/i, /\bseene\s*(mein|me)\s*dard\b/i, /\bchest\s*tightness\b/i,
-  /\bshortness\s*of\s*breath\b/i, /\bcant\s*breathe\b/i, /\bcan't\s*breathe\b/i,
-  /\bsaans\s*nahi\s*aa\s*rahi\b/i, /\bsaans\s*lene\s*(mein|me)\s*dikkat\b/i,
-  /\bdam\s*ghut\s*raha\b/i, /\bbreathlessness\b/i, /\basphyxia\b/i,
-  /\bstroke\b/i, /\bparalysis\b/i, /\bface\s*droop\b/i, /\bslurred\s*speech\b/i,
-  /\bunconscious\b/i, /\bpassed\s*out\b/i, /\bbehosh\b/i, /\bbehoshi\b/i, /\bfainting\b/i,
-  /\bheavy\s*bleeding\b/i, /\bsevere\s*bleeding\b/i, /\buncontrolled\s*bleeding\b/i,
-  /\banaphylaxis\b/i, /\bswollen\s*throat\b/i, /\bswollen\s*tongue\b/i,
-  /\bsuicide\b/i, /\bsuicidal\b/i, /\bkill\s*myself\b/i, /\bself\s*harm\b/i,
-  /\bseizure\b/i, /\bconvulsion\b/i,
-];
-
-const EMERGENCY_RESPONSE_TEMPLATE = `🚨 **EMERGENCY WARNING — IMMEDIATE MEDICAL ATTENTION REQUIRED**
-
-Your description includes symptoms that could indicate a severe or life-threatening emergency (such as severe chest pain, severe breathing difficulty, stroke symptoms, loss of consciousness, uncontrolled bleeding, or severe allergic reaction).
-
-**Please do NOT wait for an AI assessment.**
-
-📞 **Call Emergency Services Immediately:**
-• **112** — National Emergency Helpline (India)
-• **108** — Emergency Ambulance Services
-• **911** / Local Emergency Number (International)
-• Or reach the nearest Hospital / Emergency Room immediately.
-
-*Personal AI Doctor is an educational decision-support tool and cannot treat life-threatening medical emergencies.*`;
-
-function checkRedFlags(text = '') {
-  for (const pattern of RED_FLAG_PATTERNS) {
-    if (pattern.test(text)) {
-      return { is_emergency: true, emergency_message: EMERGENCY_RESPONSE_TEMPLATE };
-    }
-  }
-  return { is_emergency: false, emergency_message: null };
-}
-
-function checkRedFlagsInIntake(symptoms = [], notes = '', severityScore = 5) {
-  const combined = `${symptoms.join(' ')} ${notes}`;
-  const flag = checkRedFlags(combined);
-  if (flag.is_emergency) return flag;
-
-  const critical = ['shortness of breath', 'chest pain', 'fainting', 'unconscious', 'heavy bleeding', 'stroke'];
-  for (const sym of symptoms) {
-    const low = String(sym).toLowerCase();
-    if (severityScore >= 8 && critical.some((c) => low.includes(c))) {
-      return { is_emergency: true, emergency_message: EMERGENCY_RESPONSE_TEMPLATE };
-    }
-  }
-  return { is_emergency: false, emergency_message: null };
-}
-
-// ---------------------------------------------------------------------------
-// Medical Knowledge Base & Symptom Classifier
-// ---------------------------------------------------------------------------
-const KNOWLEDGE_BASE = {
-  'Viral Fever': {
-    english: {
-      condition: 'Viral Fever',
-      cause: 'Viral infection (like adenoviruses or seasonal enteroviruses) triggering immune response and body temperature spike.',
-      medication_guidance: 'Paracetamol (e.g., Crocin / Dolo 650) is commonly used to lower fever and relieve body aches. Confirm exact dosage with a pharmacist or doctor.',
-      recovery_days: '3 to 5 days with proper rest and hydration.',
-      diet_advice: 'Light, warm foods like khichdi, soup, daliya, coconut water, ORS solution, and warm water.',
-      foods_to_avoid: 'Oily foods, heavy spicy curries, ice cream, cold carbonated drinks, and junk food.',
-      natural_recovery: 'Lukewarm sponge baths, warm salt-water gargling, drinking tulsi-ginger decoction (kadha), and complete bed rest.',
-      home_remedies: 'Warm saltwater gargle, sponge forehead with lukewarm water if temperature exceeds 101°F.',
-      rest_days: '2 to 3 days complete bed rest; avoid heavy physical work.',
-      red_flags: 'Fever exceeding 103°F, shortness of breath, continuous vomiting, or fever persisting beyond 4 days.',
-    },
-    hindi: {
-      condition: 'वायरल बुखार (Viral Fever)',
-      cause: 'वायरल संक्रमण के कारण शरीर की रोग प्रतिरोधक क्षमता सक्रिय होती है और बुखार आता है।',
-      medication_guidance: 'बुखार और बदन दर्द कम करने के लिए पैरासिटामोल (जैसे डोलो 650 या क्रोसिन) ली जाती है। सही खुराक के लिए डॉक्टर से सलाह लें।',
-      recovery_days: '3 से 5 दिन सही आराम और पानी पीने से।',
-      diet_advice: 'हल्का और गर्म खाना जैसे खिचड़ी, सूप, दलिया, नारियल पानी, ओआरएस (ORS) और गुनगुना पानी।',
-      foods_to_avoid: 'तला-भुना खाना, ज्यादा मसालेदार सब्जी, आइसक्रीम, ठंडी कोल्ड ड्रिंक्स और जंक फूड।',
-      natural_recovery: 'गुनगुने पानी की पट्टियां माथे पर रखें, तुलसी-अदरक का काढ़ा पिएं और पूरा आराम करें।',
-      home_remedies: 'नमक के गुनगुने पानी से गरारे करें और बुखार 101°F से ऊपर होने पर माथे पर गुनगुने पानी की पट्टी रखें।',
-      rest_days: '2 से 3 दिन पूरा बेड रेस्ट करें।',
-      red_flags: '103°F से ज्यादा तेज बुखार, सांस लेने में तकलीफ, लगातार उल्टी होना या 4 दिन से ज्यादा बुखार रहना।',
-    },
-    hinglish: {
-      condition: 'Viral Bukhar (Viral Fever)',
-      cause: 'Viral infection ki wajah se body ka temperature badh jata hai.',
-      medication_guidance: 'Bukhar aur badan dard ke liye Paracetamol (jaise Dolo 650 ya Crocin) istemal hoti hai. Sahi dosage ke liye doctor se baat karein.',
-      recovery_days: '3 se 5 din sahi rest aur paani peene se.',
-      diet_advice: 'Halka aur garam khana jaise khichdi, daliya, veg soup, nariyal paani, ORS ghol aur gunguna paani.',
-      foods_to_avoid: 'Tala hua khana, zyada masaledar cheezein, ice cream, thandi cold drinks aur junk food.',
-      natural_recovery: 'Gungune paani ki patti mathe par rakhein, tulsi-adrak ka kadha pio aur poora bed rest karein.',
-      home_remedies: 'Gungune namak ke paani se garare karein aur bukhar 101°F se zyada ho toh mathe par patti rakhein.',
-      rest_days: '2 se 3 din poora bed rest karein.',
-      red_flags: '103°F se zyada bukhar, saans lene me takleef, baar baar ulti aana ya 4 din se zyada bukhar rehna.',
-    },
-  },
-  'Common Cold': {
-    english: {
-      condition: 'Common Cold',
-      cause: 'Rhinovirus infection affecting the upper respiratory tract causing nasal mucosal inflammation.',
-      medication_guidance: 'Antihistamines (like Cetirizine) for runny nose, nasal decongestant drops, and mild analgesics for headaches.',
-      recovery_days: '4 to 7 days.',
-      diet_advice: 'Hot herbal tea (tulsi, ginger, honey), warm chicken/vegetable soups, citrus fruits rich in Vitamin C.',
-      foods_to_avoid: 'Chilled drinks, dairy products that increase mucus, fried snacks, and very sweet foods.',
-      natural_recovery: 'Steam inhalation with eucalyptus or carom seeds (ajwain), warm saline nasal rinses, honey-ginger paste.',
-      home_remedies: 'Steam inhalation twice daily, saline nasal spray, honey with crushed ginger for throat comfort.',
-      rest_days: '1 to 2 days of reduced activity and plenty of sleep.',
-      red_flags: 'High fever, chest pain, wheezing, or symptoms worsening after 7 days.',
-    },
-    hindi: {
-      condition: 'सामान्य जुकाम / सर्दी (Common Cold)',
-      cause: 'राइनोवायरस संक्रमण के कारण नाक और गले में सूजन और पानी बहने लगता है।',
-      medication_guidance: 'बहती नाक के लिए सिट्रीज़ीन (Cetirizine), नेज़ल ड्रॉप्स और हल्के सिरदर्द की दवाई ली जा सकती है।',
-      recovery_days: '4 से 7 दिन।',
-      diet_advice: 'गर्म हर्बल चाय (तुलसी, अदरक, शहद), गर्म सूप, और विटामिन सी वाले फल।',
-      foods_to_avoid: 'ठंडा पानी, रात में दही, तली हुई चीजें और ज्यादा मीठा।',
-      natural_recovery: 'अजवाइन या विक्स डाल कर भाप लें, अदरक-शहद का पेस्ट खाएं।',
-      home_remedies: 'दिन में 2 बार भाप (steam) लें और शहद में पिसा अदरक मिलाकर चाटें।',
-      rest_days: '1 से 2 दिन हल्का आराम और पूरी नींद लें।',
-      red_flags: 'तेज बुखार, छाती में दर्द, सांस फूलना या 7 दिन से ज्यादा जुकाम रहना।',
-    },
-    hinglish: {
-      condition: 'Sardi / Jukam (Common Cold)',
-      cause: 'Rhinovirus infection ki wajah se naak me sujan aur paani behne ki problem hoti hai.',
-      medication_guidance: 'Behti naak ke liye Cetirizine, nasal drops aur sar dard ke liye halki dawa li ja sakti hai.',
-      recovery_days: '4 se 7 din.',
-      diet_advice: 'Garam herbal chai (tulsi, adrak, shahad), garam veg soup aur Vitamin C fruits.',
-      foods_to_avoid: 'Thanda paani, raat me dahi, fried snacks aur zyaada meetha khana.',
-      natural_recovery: 'Ajwain ya Vicks daal kar steam lein, adrak-shahad ka paste khayein.',
-      home_remedies: 'Din me 2 baar steam lein aur shahad me adrak mila kar khayein.',
-      rest_days: '1 se 2 din halka rest aur achhi neend lein.',
-      red_flags: 'Teez bukhar, chhati me dard, saans phoolna ya 7 din se zyada jukam rehna.',
-    },
-  },
-  'Migraine': {
-    english: {
-      condition: 'Migraine',
-      cause: 'Neurological vascular hyper-reactivity triggered by stress, sleep changes, bright light, or specific foods.',
-      medication_guidance: 'OTC analgesics like Ibuprofen or Paracetamol at onset. Specific triptans require a doctor prescription.',
-      recovery_days: '4 to 24 hours per episode.',
-      diet_advice: 'Hydrating fluids, magnesium-rich foods (spinach, almonds), ginger tea, and regular balanced meals.',
-      foods_to_avoid: 'Excessive caffeine, aged cheese, processed meats, skipping meals, and bright screen glare.',
-      natural_recovery: 'Rest in a quiet, dark room, apply a cold compress to forehead, and practice slow deep breathing.',
-      home_remedies: 'Cold pack on forehead/temples, gentle peppermint oil massage, resting in a dark quiet room.',
-      rest_days: '1 day of quiet rest in low light.',
-      red_flags: 'Sudden thunderclap headache, fever with stiff neck, vision loss, or numbness/weakness.',
-    },
-    hindi: {
-      condition: 'माइग्रेन (Migraine)',
-      cause: 'तनाव, नींद की कमी, तेज रोशनी या खान-पान में बदलाव से सिर के एक तरफ तेज दर्द।',
-      medication_guidance: 'शुरुआती दर्द में पैरासिटामोल या आइबुप्रोफेन ली जा सकती है। बार-बार होने पर डॉक्टर से सलाह लें।',
-      recovery_days: '4 से 24 घंटे।',
-      diet_advice: 'खूब पानी, अदरक की चाय, पालक, बादाम और समय पर संतुलित भोजन।',
-      foods_to_avoid: 'ज्यादा कॉफी, भूखे रहना, तेज रोशनी और प्रोसेस्ड फूड।',
-      natural_recovery: 'अंधेरे और शांत कमरे में आराम करें, माथे पर ठंडी पट्टी रखें।',
-      home_remedies: 'माथे पर ठंडा सेंक, हल्की मालिश और शांत जगह पर नींद लें।',
-      rest_days: '1 दिन शांत माहौल में आराम।',
-      red_flags: 'अचानक बहुत तेज सिरदर्द, गर्दन में अकड़न, दिखने में धुंधलापन या सुन्नपन।',
-    },
-    hinglish: {
-      condition: 'Migraine',
-      cause: 'Stress, neend ki kami, tez roshni ya khane me gap ki wajah se sar dard trigger hota hai.',
-      medication_guidance: 'Shuruat me Paracetamol ya Ibuprofen li ja sakti hai. Doctor ki salah zaroori hai.',
-      recovery_days: '4 se 24 ghante.',
-      diet_advice: 'Paani, adrak chai, palak, badam aur time par khana.',
-      foods_to_avoid: 'Zyada caffeine, khali pet rehna, bright screen aur processed food.',
-      natural_recovery: 'Andhere aur shant kamre me rest karein, mathe par cold compress lagayein.',
-      home_remedies: 'Cold pack on forehead, gentle massage aur dark room me aaram.',
-      rest_days: '1 din ka quiet rest.',
-      red_flags: 'Achanak bahut tez sar dard, gardan akadna, dhundhla dikhna ya sunnpan.',
-    },
-  },
-  'Gastritis / Acid Reflux': {
-    english: {
-      condition: 'Gastritis / Acid Reflux',
-      cause: 'Irritation of the stomach lining or acid reflux triggered by spicy/oily food, irregular meals, or stress.',
-      medication_guidance: 'Antacids (e.g., Digene, Gelusil) or acid reducers (Pantoprazole/Omeprazole) before meals as advised by a doctor.',
-      recovery_days: '2 to 4 days with bland diet.',
-      diet_advice: 'Oatmeal, bananas, curd/yogurt, coconut water, boiled rice, and small frequent meals.',
-      foods_to_avoid: 'Spicy curries, fried snacks, citrus juices, coffee/tea on an empty stomach, and late-night heavy meals.',
-      natural_recovery: 'Drink cold milk or fennel (saunf) water, avoid lying down immediately after eating, and elevate head while sleeping.',
-      home_remedies: 'Chew fennel seeds after meals, sip lukewarm water or coconut water, eat light bland meals.',
-      rest_days: '1 day of light activity; avoid heavy exertion right after meals.',
-      red_flags: 'Severe abdominal pain, vomiting blood, black stools, or persistent vomiting.',
-    },
-    hindi: {
-      condition: 'गैस्ट्राइटिस / एसिडिटी (Gastritis)',
-      cause: 'मसालेदार या तला खाना, अनियमित भोजन या तनाव के कारण पेट में जलन और एसिड बनना।',
-      medication_guidance: 'एंटासिड (जैसे डाइजीन) या डॉक्टर की सलाह से पैंटोप्राज़ोल ली जा सकती है।',
-      recovery_days: '2 से 4 दिन हल्के खाने से।',
-      diet_advice: 'दलिया, केला, दही, नारियल पानी, सादा चावल और थोड़ा-थोड़ा खाना।',
-      foods_to_avoid: 'तीखा, तला-भुना, खाली पेट चाय-कॉफी और देर रात भारी खाना।',
-      natural_recovery: 'सौंफ का पानी पिएं, खाने के तुरंत बाद न लेटें।',
-      home_remedies: 'खाने के बाद सौंफ चबाएं और नारियल पानी पिएं।',
-      rest_days: '1 दिन हल्का आराम।',
-      red_flags: 'पेट में बहुत तेज दर्द, खून की उल्टी या लगातार उल्टी होना।',
-    },
-    hinglish: {
-      condition: 'Gastritis / Acidity',
-      cause: 'Spicy/oily khana, irregular meals ya stress se pet me jalan aur acid banta hai.',
-      medication_guidance: 'Antacid (jaise Digene) ya doctor ki salah se Pantoprazole li ja sakti hai.',
-      recovery_days: '2 se 4 din bland diet ke saath.',
-      diet_advice: 'Oatmeal, kela, dahi, nariyal paani, sada chawal aur small meals.',
-      foods_to_avoid: 'Spicy khana, fried snacks, khali pet chai/coffee aur late-night heavy dinner.',
-      natural_recovery: 'Saunf ka paani pio, khane ke turant baad mat letein.',
-      home_remedies: 'Khane ke baad saunf chabayein aur nariyal paani piyein.',
-      rest_days: '1 din light activity.',
-      red_flags: 'Pet me bahut tez dard, khoon ki ulti ya lagatar vomiting.',
-    },
-  },
-};
-
-function predictTop3(symptoms = [], notes = '') {
-  try {
-    const payload = JSON.stringify({ symptoms, notes });
-    const resultBuffer = execSync(`python3 ML/src/run_inference.py`, {
-      input: payload,
-      timeout: 5000,
-      encoding: 'utf-8',
-    });
-    const parsed = JSON.parse(resultBuffer.trim());
-    if (parsed && parsed.top3 && parsed.top3.length > 0) {
-      return { top3: parsed.top3, topConf: parsed.top_confidence || parsed.top3[0].confidence };
-    }
-  } catch (err) {
-    console.warn('[ML Inference Subprocess Warning]:', err.message);
-  }
-
-  // Fallback rule-based scores if ML process fails
-  const text = `${symptoms.join(' ')} ${notes}`.toLowerCase();
-  const scores = [
-    {
-      condition: 'Viral Fever',
-      score:
-        (text.includes('fever') || text.includes('chills') || text.includes('body ache') ? 0.55 : 0.25) +
-        (text.includes('fatigue') || text.includes('weakness') ? 0.2 : 0),
-    },
-    {
-      condition: 'Common Cold',
-      score:
-        (text.includes('cough') || text.includes('cold') || text.includes('runny') || text.includes('sore throat') || text.includes('sneez') ? 0.65 : 0.2) +
-        (text.includes('congestion') ? 0.15 : 0),
-    },
-    {
-      condition: 'Migraine',
-      score:
-        (text.includes('headache') || text.includes('migraine') || text.includes('dizz') ? 0.65 : 0.15) +
-        (text.includes('light') || text.includes('nausea') ? 0.15 : 0),
-    },
-    {
-      condition: 'Gastritis / Acid Reflux',
-      score:
-        (text.includes('stomach') || text.includes('acidity') || text.includes('nausea') || text.includes('vomit') || text.includes('abdom') || text.includes('indigestion') ? 0.7 : 0.15),
-    },
-  ];
-  scores.sort((a, b) => b.score - a.score);
-  const top3 = scores.slice(0, 3).map((s) => ({
-    condition: s.condition,
-    confidence: Math.min(0.95, Math.round(s.score * 100) / 100),
-  }));
-  return { top3, topConf: top3[0].confidence };
-}
-
-function getConditionKnowledge(condition, lang = 'english') {
-  const entry = KNOWLEDGE_BASE[condition] || KNOWLEDGE_BASE['Viral Fever'];
-  const normalized = ['hindi', 'hi'].includes(lang) ? 'hindi' : ['hinglish'].includes(lang) ? 'hinglish' : 'english';
-  return entry[normalized] || entry.english;
-}
-
-function getAllLanguageKnowledge(condition) {
-  return KNOWLEDGE_BASE[condition] || KNOWLEDGE_BASE['Viral Fever'];
-}
+// Pre-seed demo user so login is immediately available
+const demoId = 'default-demo-user';
+const demoHash = bcrypt.hashSync('Password123', 10);
+const demoUser = { id: demoId, name: 'Raghav Gupta', email: 'rgupta70610@gmail.com', passwordHash: demoHash };
+usersById.set(demoId, demoUser);
+usersByEmail.set('rgupta70610@gmail.com', demoUser);
+usersByEmail.set('demo@example.com', demoUser);
+profiles.set(demoId, {
+  user_id: demoId,
+  name: 'Raghav Gupta',
+  age: 25,
+  gender: 'Male',
+  allergies: 'None',
+  chronic_conditions: 'None',
+  location: 'Mumbai, India',
+  height: '5 ft 10 in',
+  weight: '70 kg',
+});
 
 // ---------------------------------------------------------------------------
 // Auth Helpers
@@ -344,6 +95,18 @@ function getOrCreateProfile(user) {
   return profiles.get(user.id);
 }
 
+function resolveUserOrGuest(req) {
+  const token = extractToken(req);
+  const userId = token ? sessions.get(token) : null;
+  const user = userId ? usersById.get(userId) : null;
+  if (user) {
+    return { id: user.id, name: user.name, email: user.email, isGuest: false };
+  }
+  const guestName = (req.body?.name || '').trim() || 'Guest Patient';
+  const guestId = `guest_${crypto.randomUUID().slice(0, 8)}`;
+  return { id: guestId, name: guestName, email: 'guest@aidoctor.local', isGuest: true };
+}
+
 // ---------------------------------------------------------------------------
 // Health & Auth Routes
 // ---------------------------------------------------------------------------
@@ -355,9 +118,10 @@ const RETIRED_MODELS = new Set([
   'gemini-2.0-pro',
   'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
+  'gemini-3.8-flash',
 ]);
 const envModel = (process.env.GEMINI_MODEL || '').trim();
-const ACTIVE_MODEL = !envModel || RETIRED_MODELS.has(envModel) ? 'gemini-3.8-flash' : envModel;
+const ACTIVE_MODEL = !envModel || RETIRED_MODELS.has(envModel) ? 'gemini-4-hydrogen' : envModel;
 
 app.get(['/health', '/api/health'], (_req, res) => {
   res.json({
@@ -511,8 +275,9 @@ app.post('/api/report/upload', requireAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 // Symptom Assessment
 // ---------------------------------------------------------------------------
-app.post('/api/assess', requireAuth, (req, res) => {
-  const userId = req.user.id;
+app.post('/api/assess', async (req, res) => {
+  const user = resolveUserOrGuest(req);
+  const userId = user.id;
   const data = req.body || {};
   const symptoms = Array.isArray(data.symptoms) ? data.symptoms : [];
   const severityScore = Number(data.severity_score ?? 5);
@@ -529,9 +294,23 @@ app.post('/api/assess', requireAuth, (req, res) => {
     });
   }
 
+  if (user.isGuest && !profiles.has(userId)) {
+    profiles.set(userId, {
+      user_id: userId,
+      name: data.name || user.name,
+      age: Number(data.age) || 25,
+      gender: data.gender || 'Not specified',
+      allergies: data.allergies || 'None',
+      chronic_conditions: data.chronic_conditions || 'None',
+      location: data.location || 'Not specified',
+      height: 'Not specified',
+      weight: 'Not specified',
+    });
+  }
+
   const safety = checkRedFlagsInIntake(symptoms, data.notes || '', severityScore);
   const symptomsText = symptoms.join(', ');
-  const combinedNotes = `Patient: ${data.name || req.user.name}, Age: ${data.age || 25}, Gender: ${data.gender || 'Not specified'}. Main Symptoms: ${symptomsText}. Duration: ${data.duration || '1-2 days'}. Severity: ${severityScore}/10. Notes: ${data.notes || ''}`;
+  const combinedNotes = `Patient: ${data.name || user.name}, Age: ${data.age || 25}, Gender: ${data.gender || 'Not specified'}. Main Symptoms: ${symptomsText}. Duration: ${data.duration || '1-2 days'}. Severity: ${severityScore}/10. Notes: ${data.notes || ''}`;
 
   const msgs = messagesByConv.get(conversationId) || [];
   msgs.push({ role: 'user', content: combinedNotes, timestamp: new Date().toISOString() });
@@ -544,11 +323,11 @@ app.post('/api/assess', requireAuth, (req, res) => {
       is_emergency: true,
       emergency_message: safety.emergency_message,
       conversation_id: conversationId,
-      intake_summary: { name: data.name, symptoms, severity_score: severityScore },
+      intake_summary: { name: data.name || user.name, symptoms, severity_score: severityScore },
     });
   }
 
-  const { top3, topConf } = predictTop3(symptoms, data.notes || '');
+  const { top3, topConf } = predictTop3(symptoms, data.notes || '', data.trajectory || '', data.duration || '');
   const primaryCondition = top3[0].condition;
   const knowledge = getConditionKnowledge(primaryCondition, reqLang);
   const multilingual = getAllLanguageKnowledge(primaryCondition);
@@ -560,9 +339,39 @@ app.post('/api/assess', requireAuth, (req, res) => {
     reasoningSteps.push(`• Evaluated environmental trigger: ${data.recent_food_activity}.`);
   }
   if (severityScore >= 7) {
-    reasoningSteps.push(`• Highlighted high discomfort rating (${severityScore}/10) requiring close monitoring.`);
+    reasoningSteps.push(`• Highlighted elevated discomfort rating (${severityScore}/10) requiring close symptom monitoring.`);
   }
-  const clinicalReasoning = reasoningSteps.join('\n');
+  let clinicalReasoning = reasoningSteps.join('\n');
+
+  // If Gemini API is configured, enhance clinical reasoning with medical AI
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
+      const prompt = `You are Personal AI Doctor. Provide a clinical diagnostic synthesis for:
+Patient: ${data.name || user.name}, Age: ${data.age || 25}, Gender: ${data.gender || 'Not specified'}.
+Symptoms: ${symptomsText}
+Duration: ${data.duration || '1-2 days'}, Severity: ${severityScore}/10.
+Primary Assessed Condition: ${primaryCondition}.
+Language: ${reqLang}.
+Provide 3 concise clinical reasoning bullet points explaining why this condition fits the presentation and what the patient should keep in mind. Be empathetic and professional.`;
+
+      const genRes = await ai.models.generateContent({
+        model: ACTIVE_MODEL,
+        contents: prompt,
+      });
+      const aiText = genRes.text?.trim();
+      if (aiText) {
+        clinicalReasoning = aiText;
+      }
+    } catch (aiErr) {
+      console.warn('[Gemini Clinical Assessment Warning]:', aiErr.message);
+    }
+  }
+
   const causeWithReasoning = `${knowledge.cause}\n\nClinical Assessment Reasoning:\n${clinicalReasoning}`;
 
   const diagnosisRecord = {
@@ -586,7 +395,7 @@ app.post('/api/assess', requireAuth, (req, res) => {
   const reportText = [
     'PERSONAL AI DOCTOR — CONSULTATION SUMMARY REPORT',
     `Date: ${new Date().toLocaleString()}`,
-    `Patient: ${data.name || req.user.name} (${data.age || 25} yrs, ${data.gender || 'Not specified'})`,
+    `Patient: ${data.name || user.name} (${data.age || 25} yrs, ${data.gender || 'Not specified'})`,
     `Symptoms: ${symptomsText}`,
     `Assessed Condition: ${primaryCondition} (${Math.round(topConf * 100)}% confidence)`,
     `Cause: ${knowledge.cause}`,
@@ -609,7 +418,7 @@ app.post('/api/assess', requireAuth, (req, res) => {
     report_id: reportId,
     download_url: `/api/report/download/${reportId}`,
     intake_summary: {
-      name: data.name || req.user.name,
+      name: data.name || user.name,
       age: data.age || 25,
       gender: data.gender || 'Not specified',
       location: data.location || 'Not specified',
@@ -681,7 +490,12 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: { 'User-Agent': 'aistudio-build' },
+      },
+    });
     const profile = getOrCreateProfile(req.user);
     const langInstruction =
       reqLang === 'hindi'

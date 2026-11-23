@@ -33,7 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
             headers,
             credentials: "same-origin"
         }));
-        if (response.status === 401 && !url.startsWith("/api/auth/")) {
+        if (response.status === 401 && !url.startsWith("/api/auth/") && !url.startsWith("/api/assess")) {
             lockDashboardToLogin();
         }
         return response;
@@ -699,9 +699,23 @@ document.addEventListener("DOMContentLoaded", () => {
     // -------------------------------------------------------------
     // 4. SUBMIT ASSESSMENT & RENDER RESULTS PAGE
     // -------------------------------------------------------------
-    multiStepForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        
+    async function handleAssessmentSubmit(e) {
+        if (e && typeof e.preventDefault === "function") {
+            e.preventDefault();
+        }
+
+        if (submitAssessmentBtn && submitAssessmentBtn.disabled) {
+            return;
+        }
+
+        // Ensure Step 1 defaults if left empty
+        if (stepName && !stepName.value.trim()) {
+            stepName.value = currentUser?.name || "Patient";
+        }
+        if (stepAge && (!stepAge.value || stepAge.value < 1)) {
+            stepAge.value = 25;
+        }
+
         const data = getFormIntakeData();
         if (!data.symptoms || data.symptoms.length === 0) {
             alert("Please select at least 1 symptom in Step 2!");
@@ -710,13 +724,24 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
+        // Visual loading feedback on selected button & span
+        const btnSpan = submitAssessmentBtn ? submitAssessmentBtn.querySelector("span") : null;
+        if (submitAssessmentBtn) {
+            submitAssessmentBtn.disabled = true;
+            submitAssessmentBtn.classList.add("loading-btn");
+        }
+        if (btnSpan) {
+            btnSpan.textContent = "Analyzing Symptoms...";
+        }
+        if (loadingOverlay) {
+            loadingOverlay.classList.remove("hidden");
+        }
+
         const payload = {
             ...data,
             conversation_id: activeConversationId,
             language: currentLanguage
         };
-
-        if (loadingOverlay) loadingOverlay.classList.remove("hidden");
 
         try {
             const res = await apiFetch("/api/assess", {
@@ -742,14 +767,33 @@ document.addEventListener("DOMContentLoaded", () => {
                 loadHistory();
                 showPage("results");
             } else {
-                alert("Failed to analyze symptoms. Please check server.");
+                const errData = await res.json().catch(() => ({}));
+                const msg = errData.detail || "Failed to analyze symptoms. Please check server.";
+                alert(msg);
             }
         } catch (err) {
             if (loadingOverlay) loadingOverlay.classList.add("hidden");
             console.error("Assessment error:", err);
             showNotification("Connection error. Please ensure backend server is running.", "error");
+        } finally {
+            if (submitAssessmentBtn) {
+                submitAssessmentBtn.disabled = false;
+                submitAssessmentBtn.classList.remove("loading-btn");
+            }
+            if (btnSpan) {
+                btnSpan.textContent = "✨ Analyze Symptoms";
+            }
         }
-    });
+    }
+
+    multiStepForm.addEventListener("submit", handleAssessmentSubmit);
+    if (submitAssessmentBtn) {
+        submitAssessmentBtn.addEventListener("click", (e) => {
+            if (currentStep === 5) {
+                handleAssessmentSubmit(e);
+            }
+        });
+    }
 
     function renderEmergencyPage(msg, intake) {
         resultsContainer.innerHTML = `
@@ -1476,9 +1520,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (profileWeight) profileWeight.value = (data.weight && data.weight !== "Not specified") ? data.weight : "";
                 
                 // Sync to Step 1 form if step 1 inputs exist
-                if (stepName) stepName.value = data.name || currentUser.name || "";
+                if (stepName) stepName.value = data.name || (currentUser && currentUser.name) || "";
                 if (stepAge) stepAge.value = data.age || 25;
-                if (stepGender) stepGender.value = data.gender || "Male";
+                const validGenders = ["Male", "Female", "Other", "Not specified"];
+                const resolvedGender = validGenders.includes(data.gender) ? data.gender : "Male";
+                if (stepGender) stepGender.value = resolvedGender;
+                if (profileGender) profileGender.value = resolvedGender;
                 if (stepLocation && data.location && data.location !== "Not specified") {
                     stepLocation.value = data.location;
                 }
